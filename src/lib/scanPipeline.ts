@@ -1,0 +1,444 @@
+import { shouldConsiderAttachment } from './categorisation';
+import { findDuplicateInVault } from './dedup';
+import { GmailAttachmentMeta } from '../services/gmail/types';
+import {
+  createEmptyScanJob,
+  PipelineItem,
+  QuotaPauseInfo,
+  ScanJobState,
+  ScanMode,
+  ScanStage,
+} from '../types/scan';
+import { ClassificationResult, ScanCandidate, VaultDocument } from '../types/document';
+import { enrichCandidateWithSubject, groupCandidatesBySubject } from './grouping';
+import { resolveSubjectKey, applySubjectToMetadata } from './subjectKey';
+
+export const DEFAULT_TRIAGE_BATCH_SIZE = 12;
+export const DEFAULT_GMAIL_PAGE_SIZE = 50;
+
+/** Build Gmail query for full / lookback / incremental scans. */
+export function buildScanGmailQuery(options: {
+  mode: ScanMode;
+  lookbackDays?: number;
+  sinceIso?: string | null;
+}): string {
+  const base =
+    'has:attachment (filename:pdf OR filename:jpg OR filename:jpeg OR filename:png OR filename:webp OR filename:doc OR filename:docx)';
+
+  if (options.mode === 'full') {
+    return base;
+  }
+
+  const afterDate =
+    options.mode === 'incremental' && options.sinceIso
+      ? new Date(options.sinceIso)
+      : new Date(Date.now() - (options.lookbackDays ?? 90) * 24 * 60 * 60 * 1000);
+
+  const y = afterDate.getUTCFullYear();
+  const m = String(afterDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(afterDate.getUTCDate()).padStart(2, '0');
+  return `${base} after:${y}/${m}/${d}`;
+}
+
+export function createScanJob(options: {
+  mode: ScanMode;
+  lookbackDays?: number;
+  sinceIso?: string | null;
+  nowIso?: string;
+}): ScanJobState {
+  return createEmptyScanJob({
+    mode: options.mode,
+    lookbackDays: options.lookbackDays,
+    sinceIso: options.sinceIso,
+    gmailQuery: buildScanGmailQuery(options),
+    nowIso: options.nowIso,
+  });
+}
+
+/** Tiny / junk image and size heuristics on top of existing promo filters. */
+export function passesRulePrefilter(att: GmailAttachmentMeta): boolean {
+  if (att.size > 0 && att.size < 8_000 && /^image\//i.test(att.mimeType)) {
+    return false; // tiny inline logos
+  }
+  if (/^(logo|icon|spacer|tracking|pixel|signature)[-_.]/i.test(att.filename)) {
+    return false;
+  }
+  if (/\.(gif|bmp|svg)$/i.test(att.filename)) return false;
+
+  return shouldConsiderAttachment({
+    subject: att.subject,
+    from: att.from,
+    snippet: att.snippet,
+    fileName: att.filename,
+    mimeType: att.mimeType,
+  });
+}
+
+export function itemIdForAttachment(att: GmailAttachmentMeta): string {
+  return `${att.messageId}::${att.attachmentId}`;
+}
+
+/** Ingest a Gmail search page into scan state (stage: search → filter). */
+export function ingestSearchPage(
+  state: ScanJobState,
+  page: {
+    attachments: GmailAttachmentMeta[];
+    nextPageToken: string | null;
+    estimatedTotal?: number | null;
+    messagesInPage?: number;
+  },
+  nowIso: string = new Date().toISOString(),
+): ScanJobState {
+  const next: ScanJobState = {
+    ...state,
+    stage: 'filter',
+    updatedAt: nowIso,
+    gmailPageToken: page.nextPageToken,
+    gmailSearchDone: !page.nextPageToken,
+    stats: {
+      ...state.stats,
+      emailsChecked: state.stats.emailsChecked + (page.messagesInPage ?? page.attachments.length),
+      emailsEstimatedTotal:
+        page.estimatedTotal != null ? page.estimatedTotal : state.stats.emailsEstimatedTotal,
+    },
+    processedMessageIds: [...state.processedMessageIds],
+    triageQueue: [...state.triageQueue],
+    items: { ...state.items },
+  };
+
+  const seenMessages = new Set(next.processedMessageIds);
+
+  for (const att of page.attachments) {
+    if (!seenMessages.has(att.messageId)) {
+      next.processedMessageIds.push(att.messageId);
+      seenMessages.add(att.messageId);
+    }
+
+    const id = itemIdForAttachment(att);
+    if (next.items[id]) continue;
+
+    next.stats.attachmentsFound += 1;
+    const keep = passesRulePrefilter(att);
+    if (!keep) {
+      next.stats.filteredOut += 1;
+      next.items[id] = { id, attachment: att, status: 'filtered_out' };
+      continue;
+    }
+
+    next.items[id] = { id, attachment: att, status: 'queued_triage' };
+    next.triageQueue.push(id);
+  }
+
+  if (!next.gmailSearchDone) {
+    next.stage = 'search';
+  } else if (next.triageQueue.length > 0) {
+    next.stage = 'triage';
+  } else if (next.classifyQueue.length > 0) {
+    next.stage = 'classify';
+  } else {
+    next.stage = 'dedupe';
+  }
+
+  return next;
+}
+
+export interface TriageDecision {
+  id: string;
+  isLikelyImportant: boolean;
+  confidence: number;
+  reason?: string;
+}
+
+/** Apply cheap AI triage batch results. */
+export function applyTriageBatch(
+  state: ScanJobState,
+  decisions: TriageDecision[],
+  nowIso: string = new Date().toISOString(),
+): ScanJobState {
+  const decisionMap = new Map(decisions.map((d) => [d.id, d]));
+  const batchIds = state.triageQueue.slice(0, Math.max(decisions.length, 1));
+  const ids = batchIds.length ? batchIds : [...decisionMap.keys()];
+
+  const next: ScanJobState = {
+    ...state,
+    updatedAt: nowIso,
+    items: { ...state.items },
+    triageQueue: state.triageQueue.filter((id) => !ids.includes(id) && !decisionMap.has(id)),
+    classifyQueue: [...state.classifyQueue],
+    stats: {
+      ...state.stats,
+      aiCallsUsed: state.stats.aiCallsUsed + 1,
+      triageBatches: state.stats.triageBatches + 1,
+    },
+  };
+
+  const processed = ids.length ? ids : [...decisionMap.keys()];
+  next.triageQueue = state.triageQueue.filter((id) => !processed.includes(id));
+
+  for (const id of processed) {
+    const item = next.items[id];
+    if (!item) continue;
+    const d = decisionMap.get(id);
+    if (!d || !d.isLikelyImportant) {
+      next.stats.triageSkipped += 1;
+      next.items[id] = {
+        ...item,
+        status: 'triaged_skip',
+        triageReason: d?.reason || 'Not an important document',
+        triageConfidence: d?.confidence ?? 0,
+      };
+    } else {
+      next.stats.triageKept += 1;
+      next.items[id] = {
+        ...item,
+        status: 'queued_classify',
+        triageReason: d.reason,
+        triageConfidence: d.confidence,
+      };
+      next.classifyQueue.push(id);
+    }
+  }
+
+  next.stage = next.triageQueue.length
+    ? 'triage'
+    : !next.gmailSearchDone
+      ? 'search'
+      : next.classifyQueue.length
+        ? 'classify'
+        : 'dedupe';
+
+  return next;
+}
+
+/** Take next triage batch of metadata-only payloads. */
+export function takeTriageBatch(
+  state: ScanJobState,
+  batchSize: number = DEFAULT_TRIAGE_BATCH_SIZE,
+): Array<{ id: string; attachment: GmailAttachmentMeta }> {
+  return state.triageQueue.slice(0, batchSize).map((id) => ({
+    id,
+    attachment: state.items[id].attachment,
+  }));
+}
+
+export function applyClassificationResult(
+  state: ScanJobState,
+  itemId: string,
+  classification: ClassificationResult,
+  contentHash: string | undefined,
+  vaultDocuments: VaultDocument[],
+  nowIso: string = new Date().toISOString(),
+): ScanJobState {
+  const item = state.items[itemId];
+  if (!item) return state;
+
+  const resolution = resolveSubjectKey({
+    category: classification.category,
+    metadata: classification.metadata,
+    title: classification.title,
+  });
+  const metadata = applySubjectToMetadata(classification.metadata, resolution);
+  const finalClassification = { ...classification, metadata };
+
+  const att = item.attachment;
+  let candidate: ScanCandidate = {
+    id: `cand_${itemId.replace(/[^a-zA-Z0-9]/g, '_')}`,
+    gmailMessageId: att.messageId,
+    gmailAttachmentId: att.attachmentId,
+    subject: att.subject,
+    from: att.from,
+    date: att.date,
+    fileName: att.filename,
+    mimeType: att.mimeType,
+    sizeBytes: att.size,
+    previewSnippet: att.snippet,
+    classification: finalClassification,
+    contentRef: contentHash,
+    status: finalClassification.isImportantDocument ? 'pending' : 'skipped',
+  };
+  candidate = enrichCandidateWithSubject(candidate);
+
+  const dup = findDuplicateInVault(
+    {
+      hash: contentHash,
+      metadata: finalClassification.metadata,
+      title: finalClassification.title,
+      category: finalClassification.category,
+    },
+    vaultDocuments,
+  );
+
+  // Also treat same subject+type against already-found candidates as version, not separate
+  if (dup.isDuplicate) {
+    candidate = {
+      ...candidate,
+      status: 'duplicate',
+      duplicateOfId: dup.duplicateOfId,
+    };
+  }
+
+  const next: ScanJobState = {
+    ...state,
+    updatedAt: nowIso,
+    items: {
+      ...state.items,
+      [itemId]: {
+        ...item,
+        status: dup.isDuplicate ? 'duplicate' : 'classified',
+        classification: finalClassification,
+        contentHash,
+        candidateId: candidate.id,
+      },
+    },
+    classifyQueue: state.classifyQueue.filter((id) => id !== itemId),
+    candidates: [...state.candidates.filter((c) => c.id !== candidate.id), candidate],
+    stats: {
+      ...state.stats,
+      aiCallsUsed: state.stats.aiCallsUsed + 1,
+      classifyCalls: state.stats.classifyCalls + 1,
+      documentsFound:
+        state.stats.documentsFound +
+        (candidate.status === 'pending' || candidate.status === 'needs_subject_confirm' ? 1 : 0),
+      duplicates: state.stats.duplicates + (dup.isDuplicate ? 1 : 0),
+    },
+  };
+
+  // Re-group all candidates so review list shows entity groups incrementally
+  const grouped = groupCandidatesBySubject(next.candidates);
+  next.candidates = grouped.flat;
+
+  if (next.classifyQueue.length) next.stage = 'classify';
+  else if (next.triageQueue.length) next.stage = 'triage';
+  else if (!next.gmailSearchDone) next.stage = 'search';
+  else next.stage = 'dedupe';
+
+  return next;
+}
+
+export function finalizeDedupeGrouping(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
+  const grouped = groupCandidatesBySubject(state.candidates);
+  return {
+    ...state,
+    stage: 'completed',
+    updatedAt: nowIso,
+    candidates: grouped.flat,
+    gmailSearchDone: true,
+  };
+}
+
+export function pauseForQuota(
+  state: ScanJobState,
+  err: { message?: string; status?: number },
+  resumeAfterMs: number = 60 * 60 * 1000,
+  now: Date = new Date(),
+): ScanJobState {
+  const pause: QuotaPauseInfo = {
+    reason: err.message || 'AI quota / rate limit reached',
+    pausedAt: now.toISOString(),
+    resumeAfter: new Date(now.getTime() + resumeAfterMs).toISOString(),
+    httpStatus: err.status,
+    stageWhenPaused: state.stage === 'paused_quota' ? state.quotaPause?.stageWhenPaused || 'triage' : state.stage,
+  };
+  return {
+    ...state,
+    stage: 'paused_quota',
+    quotaPause: pause,
+    updatedAt: now.toISOString(),
+  };
+}
+
+export function pauseByUser(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
+  return {
+    ...state,
+    stage: 'paused_user',
+    userPaused: true,
+    updatedAt: nowIso,
+  };
+}
+
+export function resumeScan(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
+  if (state.cancelled || state.stage === 'completed') return state;
+  let stage: ScanStage = 'search';
+  if (!state.gmailSearchDone) stage = 'search';
+  else if (state.triageQueue.length) stage = 'triage';
+  else if (state.classifyQueue.length) stage = 'classify';
+  else stage = 'dedupe';
+
+  return {
+    ...state,
+    stage,
+    userPaused: false,
+    quotaPause: null,
+    updatedAt: nowIso,
+  };
+}
+
+export function cancelScan(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
+  return { ...state, stage: 'cancelled', cancelled: true, updatedAt: nowIso };
+}
+
+export function isQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: number; statusCode?: number; message?: string };
+  const status = e.status ?? e.statusCode;
+  if (status === 429) return true;
+  const msg = (e.message || '').toLowerCase();
+  return (
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('too many requests')
+  );
+}
+
+export function estimateRemaining(state: ScanJobState): {
+  percent: number;
+  label: string;
+} {
+  const est = state.stats.emailsEstimatedTotal;
+  if (est && est > 0) {
+    const pct = Math.min(99, Math.round((state.stats.emailsChecked / est) * 100));
+    return { percent: state.stage === 'completed' ? 100 : pct, label: `${pct}% of mailbox` };
+  }
+  const pending =
+    (state.gmailSearchDone ? 0 : 1) + state.triageQueue.length + state.classifyQueue.length;
+  const done = state.stats.attachmentsFound - state.triageQueue.length - state.classifyQueue.length;
+  const total = Math.max(state.stats.attachmentsFound, 1);
+  const pct = state.stage === 'completed' ? 100 : Math.min(95, Math.round((done / total) * 80));
+  return {
+    percent: pct,
+    label: pending ? `${pending} items left in queues` : 'Finishing…',
+  };
+}
+
+export function getActiveStageLabel(stage: ScanStage): string {
+  switch (stage) {
+    case 'search':
+      return 'Searching Gmail (no AI)';
+    case 'filter':
+      return 'Rule-based pre-filter';
+    case 'triage':
+      return 'Cheap AI triage (metadata batches)';
+    case 'classify':
+      return 'Full document classification';
+    case 'dedupe':
+      return 'Grouping & dedupe';
+    case 'paused_quota':
+      return 'Paused — AI quota / rate limit';
+    case 'paused_user':
+      return 'Paused by you';
+    case 'completed':
+      return 'Completed';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return 'Idle';
+  }
+}
+
+/** Pure helper: chunk an array for triage batching. */
+export function chunkForBatch<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}

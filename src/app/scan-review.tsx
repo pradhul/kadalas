@@ -1,129 +1,184 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Banner, Button, Chip, EmptyState, Screen } from '../components/ui';
+import React, { useMemo, useState } from 'react';
+import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
+import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Banner, Button, Screen, SectionTitle } from '../components/ui';
 import { colors, radii, spacing, typography } from '../constants/theme';
 import { useVault } from '../context/VaultContext';
-import { MOCK_SCAN_CANDIDATES } from '../mocks/data';
-import { useMocks } from '../services/config';
+import { formatCoverageType } from '../lib/coverageSlots';
+import { buildGroupedReview } from '../lib/grouping';
+import type { ScanCandidate } from '../types/document';
 
 export default function ScanReviewScreen() {
-  const { lastScanCandidates, approveCandidates, rejectCandidate, seedScanCandidates } = useVault();
-  const [busy, setBusy] = useState(false);
+  const {
+    lastScanCandidates,
+    approveCandidates,
+    rejectCandidate,
+    resolveAmbiguousSubject,
+    seedScanCandidates,
+  } = useVault();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (useMocks() && lastScanCandidates.length === 0 && seedScanCandidates) {
-      seedScanCandidates(MOCK_SCAN_CANDIDATES);
+  const groups = useMemo(() => buildGroupedReview(lastScanCandidates), [lastScanCandidates]);
+  const pending = lastScanCandidates.filter(
+    (c) => c.status === 'pending' || c.status === 'needs_subject_confirm',
+  );
+
+  async function act(id: string, fn: () => Promise<void>) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
     }
-  }, [lastScanCandidates.length, seedScanCandidates]);
-
-  const pending = useMemo(
-    () => lastScanCandidates.filter((c) => c.status === 'pending'),
-    [lastScanCandidates],
-  );
-  const others = useMemo(
-    () => lastScanCandidates.filter((c) => c.status !== 'pending'),
-    [lastScanCandidates],
-  );
+  }
 
   return (
     <Screen>
-      <FlatList
-        data={[...pending, ...others]}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          <View style={{ marginBottom: spacing.md }}>
-            <Banner>
-              Approve important documents to save them into the matching Drive folder. Duplicates and promos are
-              pre-marked.
-            </Banner>
-            {pending.length ? (
-              <Button
-                title={`Approve all pending (${pending.length})`}
-                loading={busy}
-                onPress={async () => {
-                  setBusy(true);
-                  try {
-                    await approveCandidates(pending.map((p) => p.id));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              />
-            ) : null}
-          </View>
-        }
-        ListEmptyComponent={
-          <EmptyState title="Nothing to review" body="Run a Gmail scan to populate this list." />
-        }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={styles.top}>
-              <Text style={styles.title}>{item.classification?.title || item.fileName}</Text>
-              <Chip
-                label={item.status}
-                tone={
-                  item.status === 'pending'
-                    ? 'teal'
-                    : item.status === 'duplicate' || item.status === 'skipped'
-                      ? 'amber'
-                      : item.status === 'rejected'
-                        ? 'rose'
-                        : 'neutral'
-                }
-              />
-            </View>
-            <Text style={styles.meta}>{item.subject}</Text>
-            <Text style={styles.meta}>
-              {item.from} · {new Date(item.date).toLocaleDateString()}
-            </Text>
-            <Text style={styles.meta}>
-              {(item.classification?.category || 'Other').replace('/', ' · ')} · confidence{' '}
-              {Math.round((item.classification?.confidence || 0) * 100)}%
-            </Text>
-            {item.classification?.reason ? <Text style={styles.reason}>{item.classification.reason}</Text> : null}
-
-            {item.status === 'pending' ? (
-              <View style={styles.actions}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()}>
+            <Text style={styles.back}>← Back</Text>
+          </Pressable>
+          <SectionTitle
+            title="Review scan results"
+            subtitle={`${pending.length} pending · grouped by vehicle / subject when possible`}
+          />
+        </View>
+        <ScrollView contentContainerStyle={styles.list}>
+          {error ? <Banner tone="warn">{error}</Banner> : null}
+          {!groups.length ? (
+            <View style={{ gap: 8 }}>
+              <Banner>
+                No candidates yet. Start a mailbox scan — results appear here as they are classified.
+              </Banner>
+              {seedScanCandidates ? (
                 <Button
-                  title="Approve"
-                  onPress={async () => {
-                    setBusy(true);
-                    try {
-                      await approveCandidates([item.id]);
-                    } finally {
-                      setBusy(false);
-                    }
+                  title="Load demo review list"
+                  variant="secondary"
+                  onPress={() => {
+                    const { MOCK_SCAN_CANDIDATES } = require('../mocks/data');
+                    const { groupCandidatesBySubject } = require('../lib/grouping');
+                    const { flat } = groupCandidatesBySubject(MOCK_SCAN_CANDIDATES);
+                    seedScanCandidates(flat);
                   }}
                 />
-                <Pressable onPress={() => rejectCandidate(item.id)} style={styles.reject}>
-                  <Text style={styles.rejectText}>Reject</Text>
-                </Pressable>
-              </View>
-            ) : null}
-          </View>
-        )}
-      />
+              ) : null}
+            </View>
+          ) : null}
+          {groups.map((g) => (
+            <View key={g.id} style={styles.group} testID={`review-group-${g.id}`}>
+              <Text style={styles.groupTitle}>{g.title}</Text>
+              {g.subtitle ? <Text style={styles.meta}>{g.subtitle}</Text> : null}
+              {g.kind === 'ambiguous' ? (
+                <Banner tone="warn">
+                  Subject key unclear. Confirm registration / chassis before saving into a vehicle group.
+                </Banner>
+              ) : null}
+              {g.candidates.map((c) => (
+                <CandidateCard
+                  key={c.id}
+                  candidate={c}
+                  busy={busyId === c.id}
+                  onApprove={() => act(c.id, () => approveCandidates([c.id]))}
+                  onReject={() => act(c.id, async () => rejectCandidate(c.id))}
+                  onConfirmSubject={(key) =>
+                    act(c.id, async () => {
+                      resolveAmbiguousSubject?.(c.id, key);
+                    })
+                  }
+                />
+              ))}
+            </View>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
     </Screen>
   );
 }
 
+function CandidateCard({
+  candidate: c,
+  busy,
+  onApprove,
+  onReject,
+  onConfirmSubject,
+}: {
+  candidate: ScanCandidate;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onConfirmSubject: (key: string) => void;
+}) {
+  const m = c.classification?.metadata ?? {};
+  const done = c.status === 'approved' || c.status === 'rejected' || c.status === 'duplicate';
+  const possibleKeys = (c as ScanCandidate & { possibleSubjectKeys?: string[] }).possibleSubjectKeys;
+  return (
+    <View style={[styles.card, done && styles.cardDone]}>
+      <Text style={styles.cardTitle}>{c.fileName}</Text>
+      <Text style={styles.meta}>
+        {c.classification?.category ?? 'Unclassified'} · {m.issuer ?? 'Unknown insurer'} ·{' '}
+        {formatCoverageType(m.coverageType)}
+      </Text>
+      {m.subjectKey ? (
+        <Text style={styles.meta}>
+          Subject: {m.subjectLabel || m.subjectKey}
+          {m.coverageSlots ? ` · slots ${m.coverageSlots}` : ''}
+        </Text>
+      ) : null}
+      {m.referenceNumber ? <Text style={styles.meta}>Policy #: {m.referenceNumber}</Text> : null}
+      {m.expiryDate ? <Text style={styles.meta}>Covers until {m.expiryDate}</Text> : null}
+      {c.isGroupLatest === false ? (
+        <Text style={styles.hint}>Older version — will move to _versions when the current policy is approved</Text>
+      ) : null}
+      {c.status === 'needs_subject_confirm' && possibleKeys?.length ? (
+        <View style={styles.subjectRow}>
+          {possibleKeys.map((k) => (
+            <Button key={k} title={k} variant="secondary" disabled={busy} onPress={() => onConfirmSubject(k)} />
+          ))}
+        </View>
+      ) : null}
+      {!done && c.status !== 'needs_subject_confirm' && c.isGroupLatest !== false ? (
+        <View style={styles.actions}>
+          <Button title="Approve" loading={busy} onPress={onApprove} />
+          <Button title="Skip" variant="ghost" disabled={busy} onPress={onReject} />
+        </View>
+      ) : done ? (
+        <Text style={styles.status}>{c.status}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  list: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  card: {
-    backgroundColor: colors.paperElevated,
-    borderRadius: radii.lg,
+  safe: { flex: 1 },
+  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  back: { ...typography.caption, color: colors.teal, marginBottom: spacing.sm },
+  list: { padding: spacing.lg, gap: spacing.md, paddingBottom: 48 },
+  group: {
     borderWidth: 1,
     borderColor: colors.line,
+    borderRadius: radii.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
+    backgroundColor: colors.paperElevated,
+    gap: 8,
+  },
+  groupTitle: { ...typography.h3, color: colors.ink },
+  meta: { ...typography.caption, color: colors.inkMuted },
+  hint: { ...typography.caption, color: colors.teal, marginTop: 2 },
+  card: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: spacing.sm,
     gap: 4,
   },
-  top: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' },
-  title: { ...typography.bodyStrong, color: colors.ink, flex: 1 },
-  meta: { ...typography.caption, color: colors.inkMuted },
-  reason: { ...typography.caption, color: colors.teal, marginTop: 4 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm },
-  reject: { padding: 8 },
-  rejectText: { ...typography.bodyStrong, color: colors.rose },
+  cardDone: { opacity: 0.55 },
+  cardTitle: { ...typography.bodyStrong, color: colors.ink },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  subjectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
+  status: { ...typography.caption, color: colors.inkMuted, textTransform: 'uppercase' },
 });

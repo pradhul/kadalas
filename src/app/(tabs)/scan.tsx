@@ -1,17 +1,41 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Banner, Button, Field, Screen, SectionTitle } from '../../components/ui';
-import { colors, spacing, typography } from '../../constants/theme';
+import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useVault } from '../../context/VaultContext';
+import { estimateRemaining, getActiveStageLabel } from '../../lib/scanPipeline';
+import { useMocks } from '../../services/config';
 
 export default function ScanScreen() {
-  const { index, runScan, scanProgress, lastScanCandidates } = useVault();
+  const {
+    index,
+    scanJob,
+    lastScanCandidates,
+    startMailboxScan,
+    resumeMailboxScan,
+    pauseMailboxScan,
+    cancelMailboxScan,
+  } = useVault();
   const [lookback, setLookback] = useState('90');
   const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
 
   const hasPriorScan = Boolean(index?.lastScanAt);
+  const active =
+    scanJob &&
+    !['idle', 'completed', 'cancelled'].includes(scanJob.stage) &&
+    scanJob.stage !== undefined;
+  const pausedQuota = scanJob?.stage === 'paused_quota';
+  const pausedUser = scanJob?.stage === 'paused_user';
+  const running =
+    active && !pausedQuota && !pausedUser && scanJob!.stage !== 'completed';
+
+  const est = useMemo(() => (scanJob ? estimateRemaining(scanJob) : null), [scanJob]);
+  const pendingReview = lastScanCandidates.filter(
+    (c) => c.status === 'pending' || c.status === 'needs_subject_confirm',
+  ).length;
 
   return (
     <Screen>
@@ -19,73 +43,157 @@ export default function ScanScreen() {
         <View style={styles.content}>
           <SectionTitle
             title="Scan Gmail"
-            subtitle="Find important attachments, classify them, then approve what to keep in Drive."
+            subtitle="Staged pipeline: search → rules → cheap AI triage → full classify → entity grouping."
           />
 
           <Banner>
-            Cheap filters run first (attachment type, promo heuristics). AI is only called on survivors, queued with
-            backoff for free-tier limits.
+            Full mailbox scan is resumable and pauses on free-tier AI limits. Found documents appear in Review
+            incrementally — you can approve while the scan continues.
           </Banner>
 
           {hasPriorScan ? (
             <Text style={styles.meta}>
-              Last scan: {new Date(index!.lastScanAt!).toLocaleString()} — next run searches since then.
+              Last completed scan: {new Date(index!.lastScanAt!).toLocaleString()} — default next run is
+              incremental.
             </Text>
           ) : (
             <Field
-              label="First-run lookback (days)"
+              label="Lookback window (days) if not doing full mailbox"
               value={lookback}
               onChangeText={setLookback}
               placeholder="90"
             />
           )}
 
-          {scanProgress ? (
-            <View style={styles.progress}>
-              <Text style={styles.progressTitle}>{scanProgress.message}</Text>
+          {scanJob && scanJob.stage !== 'idle' ? (
+            <View
+              style={[styles.progress, pausedQuota && styles.progressPaused]}
+              testID="scan-progress-panel"
+            >
+              <Text style={styles.progressTitle}>{getActiveStageLabel(scanJob.stage)}</Text>
+              {pausedQuota ? (
+                <Banner tone="warn">
+                  AI quota / rate limit hit. Resumes {new Date(scanJob.quotaPause!.resumeAfter).toLocaleString()}{' '}
+                  automatically, or tap Resume.
+                </Banner>
+              ) : null}
               <Text style={styles.meta}>
-                {scanProgress.current}/{scanProgress.total}
+                Emails checked: {scanJob.stats.emailsChecked}
+                {scanJob.stats.emailsEstimatedTotal != null
+                  ? ` / ~${scanJob.stats.emailsEstimatedTotal}`
+                  : ''}
+              </Text>
+              <Text style={styles.meta}>
+                Attachments: {scanJob.stats.attachmentsFound} · filtered {scanJob.stats.filteredOut} · triage
+                kept {scanJob.stats.triageKept}
+              </Text>
+              <Text style={styles.meta}>
+                Documents found: {scanJob.stats.documentsFound} · AI calls: {scanJob.stats.aiCallsUsed} ·{' '}
+                {est?.label}
               </Text>
               <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.barFill,
-                    {
-                      width: `${Math.max(
-                        8,
-                        (scanProgress.current / Math.max(scanProgress.total, 1)) * 100,
-                      )}%`,
-                    },
-                  ]}
-                />
+                <View style={[styles.barFill, { width: `${Math.max(6, est?.percent ?? 6)}%` }]} />
+              </View>
+
+              <View style={styles.row}>
+                {running ? (
+                  <Button title="Pause" variant="secondary" onPress={() => void pauseMailboxScan()} />
+                ) : null}
+                {pausedQuota || pausedUser ? (
+                  <Button title="Resume" onPress={() => void resumeMailboxScan()} />
+                ) : null}
+                {active && scanJob.stage !== 'completed' ? (
+                  <Button title="Cancel" variant="ghost" onPress={() => void cancelMailboxScan()} />
+                ) : null}
+                {pendingReview > 0 ? (
+                  <Button
+                    title={`Review (${pendingReview})`}
+                    variant="secondary"
+                    onPress={() => router.push('/scan-review')}
+                  />
+                ) : null}
               </View>
             </View>
           ) : null}
 
           {error ? <Banner tone="warn">{error}</Banner> : null}
 
-          <Button
-            title="Scan for new documents"
-            loading={Boolean(scanProgress)}
-            onPress={async () => {
-              setError(null);
-              try {
-                const days = Number(lookback) || 90;
-                const candidates = await runScan(hasPriorScan ? undefined : days);
-                router.push('/scan-review');
-                if (!candidates.length) {
-                  setError('No new document candidates found in this window.');
+          {!hasPriorScan ? (
+            <View style={styles.choice}>
+              <Pressable
+                style={styles.choiceCard}
+                onPress={async () => {
+                  setError(null);
+                  setStarting(true);
+                  try {
+                    await startMailboxScan({ mode: 'full', mockQuotaAfter: useMocks() ? 3 : undefined });
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setStarting(false);
+                  }
+                }}
+              >
+                <Text style={styles.choiceTitle}>Full mailbox scan</Text>
+                <Text style={styles.meta}>All-time attachments · resumable · best first run</Text>
+              </Pressable>
+              <Pressable
+                style={styles.choiceCard}
+                onPress={async () => {
+                  setError(null);
+                  setStarting(true);
+                  try {
+                    await startMailboxScan({ mode: 'lookback', lookbackDays: Number(lookback) || 90 });
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setStarting(false);
+                  }
+                }}
+              >
+                <Text style={styles.choiceTitle}>Lookback ({lookback || '90'} days)</Text>
+                <Text style={styles.meta}>Smaller first pass if you prefer</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Button
+              title="Scan for new documents (since last scan)"
+              loading={starting || Boolean(running)}
+              onPress={async () => {
+                setError(null);
+                setStarting(true);
+                try {
+                  await startMailboxScan({ mode: 'incremental' });
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setStarting(false);
                 }
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              }
-            }}
-          />
+              }}
+            />
+          )}
+
+          {hasPriorScan ? (
+            <View style={{ marginTop: spacing.md }}>
+              <Button
+                title="Run full mailbox scan again"
+                variant="secondary"
+                onPress={async () => {
+                  setStarting(true);
+                  try {
+                    await startMailboxScan({ mode: 'full', mockQuotaAfter: useMocks() ? 3 : undefined });
+                  } finally {
+                    setStarting(false);
+                  }
+                }}
+              />
+            </View>
+          ) : null}
 
           {lastScanCandidates.length ? (
             <View style={{ marginTop: spacing.md }}>
               <Button
-                title={`Review last scan (${lastScanCandidates.filter((c) => c.status === 'pending').length} pending)`}
+                title={`Open review list (${pendingReview} pending)`}
                 variant="secondary"
                 onPress={() => router.push('/scan-review')}
               />
@@ -100,16 +208,17 @@ export default function ScanScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.sm },
-  meta: { ...typography.caption, color: colors.inkMuted, marginBottom: spacing.md },
+  meta: { ...typography.caption, color: colors.inkMuted, marginBottom: 4 },
   progress: {
     backgroundColor: colors.paperElevated,
-    borderRadius: 12,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.line,
     padding: spacing.md,
     marginBottom: spacing.md,
     gap: 6,
   },
+  progressPaused: { borderColor: colors.amber, backgroundColor: colors.amberSoft },
   progressTitle: { ...typography.bodyStrong, color: colors.ink },
   barTrack: {
     height: 8,
@@ -117,9 +226,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.line,
     overflow: 'hidden',
     marginTop: 4,
+    marginBottom: 8,
   },
-  barFill: {
-    height: '100%',
-    backgroundColor: colors.teal,
+  barFill: { height: '100%', backgroundColor: colors.teal },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  choice: { gap: spacing.sm, marginTop: spacing.sm },
+  choiceCard: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    backgroundColor: colors.paperElevated,
+    gap: 4,
   },
+  choiceTitle: { ...typography.h3, color: colors.ink },
 });

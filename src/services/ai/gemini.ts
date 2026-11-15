@@ -2,7 +2,15 @@ import { classifyWithRules, mergeClassification } from '../../lib/categorisation
 import { normalizeCategory } from '../../lib/folders';
 import { isNewerVersion, scoreDocumentMatch } from '../../lib/matching';
 import { ClassificationResult } from '../../types/document';
-import { AiFileInput, AiProvider, VersionConfirmInput, VersionConfirmResult } from './types';
+import {
+  AiFileInput,
+  AiProvider,
+  TriageItemInput,
+  TriageItemResult,
+  VersionConfirmInput,
+  VersionConfirmResult,
+} from './types';
+import { shouldConsiderAttachment } from '../../lib/categorisation';
 
 const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
@@ -29,7 +37,10 @@ Return ONLY JSON with keys:
 category (one of: Insurance/Vehicle, Insurance/Health, Insurance/Home, Insurance/Life, Banking, Tax, Identity, Bills, Warranties, Travel, Other),
 title (clean short title),
 issuer, documentType, referenceNumber, holderName, issueDate (YYYY-MM-DD), expiryDate (YYYY-MM-DD),
+registrationNumber (vehicle plate if any), chassisNumber, engineNumber, vehicleMakeModel,
+propertyAddress, deviceSerial,
 isImportantDocument (boolean), confidence (0-1), reason (short).
+For vehicles, always extract registration/plate when visible — policy numbers change on renewal.
 Skip promos/newsletters (isImportantDocument=false).`;
 
       const parts: Array<Record<string, unknown>> = [{ text: prompt }];
@@ -66,6 +77,53 @@ Skip promos/newsletters (isImportantDocument=false).`;
       };
       const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '{}';
       return parseClassification(text, input);
+    },
+
+    async triageBatch(items: TriageItemInput[]): Promise<TriageItemResult[]> {
+      const key = await getApiKey();
+      if (!key) return ruleTriage(items);
+
+      const prompt = `You triage email attachments for a personal document vault.
+For each item, decide if it is likely an important personal document (policy, statement, tax, ID, bill, warranty, travel itinerary) vs promo/newsletter/noise.
+Return ONLY JSON: { "results": [ { "id": "...", "isLikelyImportant": true/false, "confidence": 0-1, "reason": "short" } ] }
+Items:\n${JSON.stringify(
+        items.map((i) => ({
+          id: i.id,
+          from: i.attachment.from,
+          subject: i.attachment.subject,
+          filename: i.attachment.filename,
+          mimeType: i.attachment.mimeType,
+          snippet: i.attachment.snippet,
+          size: i.attachment.size,
+        })),
+      )}`;
+
+      const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
+        }),
+      });
+      if (!res.ok) {
+        const err = new Error(`Gemini error ${res.status}`) as Error & { status: number };
+        err.status = res.status;
+        throw err;
+      }
+      const data = (await res.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '{}';
+      try {
+        const parsed = JSON.parse(extractJson(text)) as {
+          results?: TriageItemResult[];
+        };
+        if (Array.isArray(parsed.results) && parsed.results.length) return parsed.results;
+      } catch {
+        // fall through
+      }
+      return ruleTriage(items);
     },
 
     async confirmVersion(input) {
@@ -124,6 +182,12 @@ function parseClassification(text: string, input: AiFileInput): ClassificationRe
         holderName: str(json.holderName),
         issueDate: str(json.issueDate),
         expiryDate: str(json.expiryDate),
+        registrationNumber: str(json.registrationNumber),
+        chassisNumber: str(json.chassisNumber),
+        engineNumber: str(json.engineNumber),
+        vehicleMakeModel: str(json.vehicleMakeModel),
+        propertyAddress: str(json.propertyAddress),
+        deviceSerial: str(json.deviceSerial),
       },
     });
   } catch {
@@ -186,4 +250,25 @@ function str(value: unknown): string | undefined {
   if (value == null) return undefined;
   const s = String(value).trim();
   return s || undefined;
+}
+
+function ruleTriage(items: TriageItemInput[]): TriageItemResult[] {
+  return items.map((item) => {
+    const att = item.attachment;
+    const keep = shouldConsiderAttachment({
+      subject: att.subject,
+      from: att.from,
+      fileName: att.filename,
+      mimeType: att.mimeType,
+      snippet: att.snippet,
+    });
+    const hay = `${att.subject} ${att.filename} ${att.snippet}`;
+    const strong = /policy|statement|invoice|tax|passport|warranty|insurance|w-?2|renewal/i.test(hay);
+    return {
+      id: item.id,
+      isLikelyImportant: keep && strong,
+      confidence: keep && strong ? 0.7 : 0.25,
+      reason: keep && strong ? 'Rule triage: document signals' : 'Rule triage: weak/junk signals',
+    };
+  });
 }

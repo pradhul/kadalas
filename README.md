@@ -36,10 +36,19 @@ Set `EXPO_PUBLIC_USE_MOCKS=false` (and configure OAuth client IDs) when you want
 ## What you get
 
 1. **Add documents** — pick PDF/image (or demo sample); AI or rules suggest category/title/metadata; save into the right Drive folder.
-2. **Per-document Sync** — search Gmail for a newer version of the same policy/account; confirm; promote to current and keep history in `_versions`.
-3. **Scan Gmail** — lookback (default 90 days) or since last scan; cheap pre-filter; AI importance check; dedupe; approve/reject review list.
-4. **Browse / search / expiring** — folder tree, metadata search, preview/share, version history, renewals due soon.
-5. **Settings** — paste Gemini (or other) API key; usage / queue / 429 backoff; works without a key via rule-based categorisation.
+2. **Per-document Sync** — search Gmail for a newer version of the same *subject* (e.g. registration), not just policy number; confirm; promote to current and keep history in `_versions`.
+3. **Scan Gmail** — resumable full-mailbox / lookback / incremental pipeline (search → rules → cheap AI triage → classify → entity grouping). Pauses on free-tier AI quota; progress + pause/resume UI; approve while scanning continues.
+4. **Entity grouping + coverage slots** — documents group by subject key (registration / chassis / …). Vehicle insurance uses generic **coverage slots** `own_damage` and `third_party`: a **comprehensive / package / bundled** policy fills both; **Standalone OD** / **Liability Only** / **Act Only** fill one. A vault can hold several *current* docs per vehicle (e.g. 5-year TP + annual OD). Newer comprehensive supersedes both slots; newer OD-only leaves an active long-term TP alone. See the **vehicle cover** screen.
+5. **Browse / search / expiring** — folder tree, vehicles list, metadata search, per-slot gaps & upcoming expiry in Expiring soon.
+6. **Settings** — paste Gemini (or other) API key; usage / queue / 429 backoff; works without a key via rule-based categorisation.
+
+### Vehicle cover (India-style OD + TP)
+
+Example subject `KA-01-AB-1234`:
+
+> KA-01-AB-1234: OD covered by Progressive until Feb 2027, TP covered by Go Digit until Feb 2030
+
+AI extraction sets `coverageType`: `comprehensive` | `od_only` | `tp_only` (also recognises Package Policy, Bundled, Standalone OD, Liability Only, Act Only). The slot model in `src/lib/coverageSlots.ts` is generic so other multi-part document types can reuse it later.
 
 ### Architecture
 
@@ -49,7 +58,8 @@ Set `EXPO_PUBLIC_USE_MOCKS=false` (and configure OAuth client IDs) when you want
 | `src/services/drive` | Document Vault folder tree, uploads, `vault-index.json` |
 | `src/services/gmail` | Attachment search + download |
 | `src/services/ai` | Pluggable providers + request queue / rate limits |
-| `src/lib/*` | Matching, dedupe, versioning, categorisation (unit-tested) |
+| `src/lib/*` | Matching, dedupe, versioning, categorisation, subject keys, coverage slots, scan pipeline (unit-tested) |
+| `src/services/scanEngine` | Resumable staged mailbox scan + Drive/local persistence | |
 | `src/app/*` | Expo Router screens |
 
 **Scopes**

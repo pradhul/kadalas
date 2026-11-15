@@ -1,7 +1,9 @@
+import { getLargeMockMailbox, MockMailboxMessage } from '../../mocks/mailbox';
 import { MOCK_SCAN_CANDIDATES } from '../../mocks/data';
-import { GmailAttachmentContent, GmailAttachmentMeta, GmailService } from './types';
+import { GmailAttachmentContent, GmailAttachmentMeta, GmailSearchPage, GmailService } from './types';
 
 function encodeBase64(value: string): string {
+  if (typeof globalThis.btoa === 'function') return globalThis.btoa(value);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
   let output = '';
   for (let i = 0; i < value.length; i += 3) {
@@ -17,58 +19,116 @@ function encodeBase64(value: string): string {
   return output;
 }
 
-export function createMockGmailService(): GmailService {
-  const catalog: GmailAttachmentMeta[] = MOCK_SCAN_CANDIDATES.map((c) => ({
-    messageId: c.gmailMessageId,
-    attachmentId: c.gmailAttachmentId,
-    filename: c.fileName,
-    mimeType: c.mimeType,
-    size: c.sizeBytes,
-    subject: c.subject,
-    from: c.from,
-    date: c.date,
-    snippet: c.previewSnippet || '',
-  }));
+function parseAfter(query: string): Date | null {
+  const m = /after:(\d{4})\/(\d{2})\/(\d{2})/i.exec(query);
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
 
-  // Extra "newer version" hit for vehicle sync demos
-  catalog.push({
-    messageId: 'msg_sync_geico_newer',
-    attachmentId: 'att_sync_newer',
-    filename: 'geico-policy-latest.pdf',
-    mimeType: 'application/pdf',
-    size: 270_000,
-    subject: 'Updated GEICO declarations page — POL-88421-VA',
-    from: 'GEICO <documents@geico.com>',
-    date: new Date().toISOString(),
-    snippet: 'Attached is your updated policy declarations for POL-88421-VA.',
+function filterMailbox(query: string, mailbox: MockMailboxMessage[]): MockMailboxMessage[] {
+  const q = query.toLowerCase();
+  const after = parseAfter(query);
+
+  return mailbox.filter((item) => {
+    if (after && new Date(item.date).getTime() < after.getTime()) return false;
+    if (q.includes('progressive') || q.includes('prg-7788') || q.includes('ka-01-ab-1234')) {
+      const hay = `${item.subject} ${item.from} ${item.filename} ${item.snippet}`.toLowerCase();
+      return (
+        hay.includes('progressive') ||
+        hay.includes('prg-7788') ||
+        hay.includes('ka-01-ab-1234') ||
+        hay.includes('digit')
+      );
+    }
+    if (q.includes('has:attachment')) return true;
+    return true;
   });
+}
+
+export function createMockGmailService(): GmailService {
+  const mailbox = getLargeMockMailbox();
+
+  // Keep short-list sync helpers from demo candidates at the front for sync tests
+  const syncExtras: MockMailboxMessage[] = [
+    ...MOCK_SCAN_CANDIDATES.map((c) => ({
+      messageId: c.gmailMessageId,
+      attachmentId: c.gmailAttachmentId,
+      filename: c.fileName,
+      mimeType: c.mimeType,
+      size: c.sizeBytes,
+      subject: c.subject,
+      from: c.from,
+      date: c.date,
+      snippet: c.previewSnippet || '',
+      bodyText: c.previewSnippet || c.fileName,
+      kind: 'important' as const,
+    })),
+    {
+      messageId: 'msg_sync_od_newer',
+      attachmentId: 'att_sync_newer',
+      filename: 'progressive-od-ka01ab1234-latest.pdf',
+      mimeType: 'application/pdf',
+      size: 270_000,
+      subject: 'Progressive Standalone OD updated declarations — PRG-7788',
+      from: 'Progressive <docs@progressive.com>',
+      date: new Date().toISOString(),
+      snippet: 'Standalone OD renewal packet for KA-01-AB-1234 policy PRG-7788.',
+      bodyText:
+        'Standalone OD Own Damage only vehicle insurance registration KA-01-AB-1234 policy PRG-7788 Progressive holder Pradhul Dev issue 2026-11-01 expiry 2027-10-31',
+      kind: 'important',
+    },
+  ];
+
+  const byId = new Map<string, MockMailboxMessage>();
+  for (const row of [...syncExtras, ...mailbox]) {
+    byId.set(`${row.messageId}::${row.attachmentId}`, row);
+  }
+  const all = [...byId.values()].sort((a, b) => b.date.localeCompare(a.date));
+
+  function pageSearch(options: { query: string; maxResults?: number; pageToken?: string | null }): GmailSearchPage {
+    const filtered = filterMailbox(options.query, all);
+    const pageSize = options.maxResults ?? 50;
+    const start = options.pageToken ? Number(options.pageToken) || 0 : 0;
+    const slice = filtered.slice(start, start + pageSize);
+    const next = start + pageSize < filtered.length ? String(start + pageSize) : null;
+
+    // Unique messages in this page
+    const msgIds = new Set(slice.map((s) => s.messageId));
+
+    return {
+      attachments: slice.map(({ bodyText: _b, kind: _k, ...meta }) => meta as GmailAttachmentMeta),
+      nextPageToken: next,
+      estimatedTotal: new Set(filtered.map((f) => f.messageId)).size,
+      messagesInPage: msgIds.size,
+    };
+  }
 
   return {
-    async searchMessagesWithAttachments({ query, maxResults = 25 }) {
-      const q = query.toLowerCase();
-      const filtered = catalog.filter((item) => {
-        if (q.includes('after:')) {
-          // Keep simple: mock ignores precise after filtering beyond returning recent items
-        }
-        const hay = `${item.subject} ${item.from} ${item.filename} ${item.snippet}`.toLowerCase();
-        if (q.includes('geico') || q.includes('pol-88421')) {
-          return hay.includes('geico') || hay.includes('pol-88421');
-        }
-        if (q.includes('has:attachment')) return true;
-        return hay.includes(q.slice(0, 12));
-      });
-      return filtered.slice(0, maxResults);
+    async searchMessagesWithAttachments(options) {
+      const page = pageSearch({ ...options, pageToken: null });
+      return page.attachments;
+    },
+
+    async searchAttachmentsPage(options) {
+      return pageSearch(options);
     },
 
     async getAttachment(messageId, attachmentId) {
-      const meta = catalog.find((c) => c.messageId === messageId && c.attachmentId === attachmentId);
+      const meta = byId.get(`${messageId}::${attachmentId}`);
       if (!meta) throw new Error('Mock attachment not found');
-      const payload = `MOCK_PDF_CONTENT:${meta.filename}:${meta.messageId}`;
-      const dataBase64 =
-        typeof globalThis.btoa === 'function'
-          ? globalThis.btoa(payload)
-          : encodeBase64(payload);
-      return { ...meta, dataBase64 } satisfies GmailAttachmentContent;
+      const payload = `MOCK_PDF:${meta.filename}:${meta.bodyText}`;
+      return {
+        messageId: meta.messageId,
+        attachmentId: meta.attachmentId,
+        filename: meta.filename,
+        mimeType: meta.mimeType,
+        size: meta.size,
+        subject: meta.subject,
+        from: meta.from,
+        date: meta.date,
+        snippet: meta.snippet,
+        dataBase64: encodeBase64(payload),
+      };
     },
   };
 }

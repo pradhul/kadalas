@@ -9,6 +9,7 @@ import {
   VaultIndex,
 } from '../../types/document';
 import { MOCK_VAULT_INDEX } from '../../mocks/data';
+import { ScanJobState } from '../../types/scan';
 import { DriveFileRef, DriveService, UploadInput } from './types';
 
 const STORAGE_KEY = 'dv_mock_drive_v1';
@@ -18,6 +19,7 @@ interface MockState {
   folderIdsByPath: Record<string, string>;
   files: Record<string, DriveFileRef & { content?: string; parentId: string }>;
   index: VaultIndex;
+  scanState: ScanJobState | null;
 }
 
 function emptyState(): MockState {
@@ -53,6 +55,7 @@ function emptyState(): MockState {
       },
     },
     index: seed,
+    scanState: null,
   };
 }
 
@@ -167,6 +170,15 @@ export function createMockDriveService(): DriveService {
       index.updatedAt = new Date().toISOString();
       await this.saveIndex(index);
       return index;
+    },
+
+    async saveScanState(state) {
+      memory.scanState = state ? structuredClone(state) : null;
+      saveState(memory);
+    },
+
+    async loadScanState() {
+      return memory.scanState ? structuredClone(memory.scanState) : null;
     },
   };
 }

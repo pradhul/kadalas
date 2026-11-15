@@ -5,6 +5,7 @@ import {
   DocumentMetadata,
   VaultDocument,
 } from '../../types/document';
+import { GmailAttachmentMeta } from '../gmail/types';
 
 export interface AiFileInput {
   fileName: string;
@@ -35,11 +36,25 @@ export interface VersionConfirmResult {
   classification?: ClassificationResult;
 }
 
+export interface TriageItemInput {
+  id: string;
+  attachment: Pick<GmailAttachmentMeta, 'from' | 'subject' | 'filename' | 'mimeType' | 'snippet' | 'size'>;
+}
+
+export interface TriageItemResult {
+  id: string;
+  isLikelyImportant: boolean;
+  confidence: number;
+  reason?: string;
+}
+
 export interface AiProvider {
   id: AiProviderId;
   displayName: string;
   classifyDocument(input: AiFileInput): Promise<ClassificationResult>;
   confirmVersion(input: VersionConfirmInput): Promise<VersionConfirmResult>;
+  /** Cheap metadata-only batch triage (no file bytes). */
+  triageBatch?(items: TriageItemInput[]): Promise<TriageItemResult[]>;
 }
 
 export interface AiService {
@@ -48,6 +63,9 @@ export interface AiService {
   hasApiKey(): Promise<boolean>;
   classifyDocument(input: AiFileInput): Promise<ClassificationResult>;
   confirmVersion(input: VersionConfirmInput): Promise<VersionConfirmResult>;
+  triageBatch(items: TriageItemInput[]): Promise<TriageItemResult[]>;
   getUsage(): AiUsageStats;
   subscribeUsage(listener: (stats: AiUsageStats) => void): () => void;
+  /** Test hook — force next N AI calls to fail with 429 */
+  __setMockQuotaFailAfter?: (n: number) => void;
 }

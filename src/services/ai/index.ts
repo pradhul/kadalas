@@ -5,7 +5,8 @@ import { getAiApiKey, getPreferredProvider, savePreferredProvider } from '../sec
 import { createGeminiProvider } from './gemini';
 import { createMockAiProvider } from './mockAi';
 import { createOpenAiCompatibleProvider } from './openaiCompatible';
-import { AiProvider, AiService } from './types';
+import { AiProvider, AiService, TriageItemInput } from './types';
+import { MOCK_QUOTA_EVERY_N_AI_CALLS } from '../../mocks/mailbox';
 
 export * from './types';
 
@@ -46,6 +47,8 @@ export function createAiService(): AiService {
   let requestsToday = 0;
   let lastRequestAt: string | null = null;
   let lastError: string | null = null;
+  let mockQuotaFailAfter: number | null = useMocks() ? MOCK_QUOTA_EVERY_N_AI_CALLS : null;
+  let callsSinceResume = 0;
   const listeners = new Set<(stats: AiUsageStats) => void>();
 
   const emit = (queueDepth: number, rateLimitedUntil: number | null) => {
@@ -60,7 +63,7 @@ export function createAiService(): AiService {
   };
 
   const queue = new RequestQueue(
-    { maxConcurrent: 1, minIntervalMs: 1500, maxPerWindow: 10, windowMs: 60_000 },
+    { maxConcurrent: 1, minIntervalMs: 800, maxPerWindow: 20, windowMs: 60_000 },
     (q) => emit(q.pending + q.active, q.rateLimitedUntil),
   );
 
@@ -69,21 +72,32 @@ export function createAiService(): AiService {
   });
 
   const run = async <T>(fn: () => Promise<T>): Promise<T> => {
-    try {
-      const result = await queue.enqueue(fn);
-      requestsToday += 1;
-      lastRequestAt = new Date().toISOString();
-      lastError = null;
-      emit(queue.getStats().pending + queue.getStats().active, queue.getStats().rateLimitedUntil);
-      return result;
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      emit(queue.getStats().pending + queue.getStats().active, queue.getStats().rateLimitedUntil);
-      throw err;
-    }
+    return queue.enqueue(async () => {
+      if (mockQuotaFailAfter != null && callsSinceResume >= mockQuotaFailAfter) {
+        callsSinceResume = 0;
+        const err = new Error('Mock free-tier quota exceeded (429)') as Error & { status: number };
+        err.status = 429;
+        lastError = err.message;
+        emit(queue.getStats().pending + queue.getStats().active, Date.now() + 60_000);
+        throw err;
+      }
+      try {
+        const result = await fn();
+        requestsToday += 1;
+        callsSinceResume += 1;
+        lastRequestAt = new Date().toISOString();
+        lastError = null;
+        emit(queue.getStats().pending + queue.getStats().active, queue.getStats().rateLimitedUntil);
+        return result;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        emit(queue.getStats().pending + queue.getStats().active, queue.getStats().rateLimitedUntil);
+        throw err;
+      }
+    });
   };
 
-  return {
+  const service: AiService = {
     getProviderId: () => providerId,
 
     async setProvider(id) {
@@ -107,6 +121,16 @@ export function createAiService(): AiService {
       return run(() => provider.confirmVersion(input));
     },
 
+    triageBatch(items: TriageItemInput[]) {
+      const provider = providers[providerId] || providers.mock;
+      return run(async () => {
+        if (provider.triageBatch) return provider.triageBatch(items);
+        // Fallback: treat each as important if rules say so
+        const mock = providers.mock;
+        return mock.triageBatch!(items);
+      });
+    },
+
     getUsage() {
       const q = queue.getStats();
       return {
@@ -123,7 +147,14 @@ export function createAiService(): AiService {
       listener(this.getUsage());
       return () => listeners.delete(listener);
     },
+
+    __setMockQuotaFailAfter(n: number) {
+      mockQuotaFailAfter = n;
+      callsSinceResume = 0;
+    },
   };
+
+  return service;
 }
 
 let singleton: AiService | null = null;

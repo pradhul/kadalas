@@ -1,4 +1,5 @@
 import { VaultCategory, VaultDocument, VaultIndex } from '../../types/document';
+import { ScanJobState } from '../../types/scan';
 
 export interface DriveFileRef {
   id: string;
@@ -31,4 +32,6 @@ export interface DriveService {
   archiveToVersions(fileId: string, versionsFolderId: string): Promise<DriveFileRef>;
   /** Convenience used by vault context after metadata edits */
   upsertDocument(doc: VaultDocument): Promise<VaultIndex>;
+  saveScanState(state: ScanJobState | null): Promise<void>;
+  loadScanState(): Promise<ScanJobState | null>;
 }

@@ -45,6 +45,7 @@ export default function RootLayout() {
           <Stack.Screen name="add" options={{ headerShown: true, title: 'Add document', presentation: 'modal', headerTintColor: colors.ink }} />
           <Stack.Screen name="search" options={{ headerShown: true, title: 'Search', headerTintColor: colors.ink }} />
           <Stack.Screen name="scan-review" options={{ headerShown: true, title: 'Scan review', headerTintColor: colors.ink }} />
+          <Stack.Screen name="vehicle/[subjectKey]" options={{ headerShown: false }} />
         </Stack>
       </VaultProvider>
     </AuthProvider>

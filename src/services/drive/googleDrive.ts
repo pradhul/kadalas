@@ -7,6 +7,7 @@ import {
   VaultDocument,
   VaultIndex,
 } from '../../types/document';
+import { SCAN_STATE_FILENAME, ScanJobState } from '../../types/scan';
 import { getAuthService } from '../auth';
 import { DriveFileRef, DriveService, UploadInput } from './types';
 
@@ -218,7 +219,56 @@ export function createGoogleDriveService(): DriveService {
       await this.saveIndex(index);
       return index;
     },
+
+    async saveScanState(state: ScanJobState | null) {
+      const s = await ensureStructure();
+      const existingId = await findNamedFile(s.vaultFolderId, SCAN_STATE_FILENAME);
+      if (state == null) {
+        if (existingId) {
+          await driveFetch(`${DRIVE}/files/${existingId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trashed: true }),
+          });
+        }
+        return;
+      }
+      const body = JSON.stringify(state);
+      if (!existingId) {
+        const form = buildMultipart(
+          { name: SCAN_STATE_FILENAME, parents: [s.vaultFolderId], mimeType: 'application/json' },
+          body,
+          'application/json',
+        );
+        await driveFetch(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
+          body: form.body,
+        });
+        return;
+      }
+      await driveFetch(`${UPLOAD}/files/${existingId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    },
+
+    async loadScanState() {
+      const s = await ensureStructure();
+      const id = await findNamedFile(s.vaultFolderId, SCAN_STATE_FILENAME);
+      if (!id) return null;
+      const res = await driveFetch(`${DRIVE}/files/${id}?alt=media`);
+      return (await res.json()) as ScanJobState;
+    },
   };
+}
+
+async function findNamedFile(vaultFolderId: string, name: string): Promise<string | null> {
+  const q = `name = '${name.replace(/'/g, "\\'")}' and '${vaultFolderId}' in parents and trashed = false`;
+  const res = await driveFetch(`${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`);
+  const data = (await res.json()) as { files?: Array<{ id: string }> };
+  return data.files?.[0]?.id ?? null;
 }
 
 function buildMultipart(

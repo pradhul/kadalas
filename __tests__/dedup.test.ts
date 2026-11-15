@@ -5,18 +5,18 @@ import { ScanCandidate } from '../src/types/document';
 describe('dedup', () => {
   it('detects duplicate by file hash', () => {
     const result = findDuplicateInVault(
-      { hash: 'fnv1a-veh002', title: 'copy' },
+      { hash: 'fnv1a-od-2026', title: 'copy' },
       MOCK_VAULT_INDEX.documents,
     );
     expect(result.isDuplicate).toBe(true);
-    expect(result.duplicateOfId).toBe('doc_vehicle_geico');
+    expect(result.duplicateOfId).toBe('doc_ka01_od');
   });
 
   it('detects duplicate by issuer + reference', () => {
     const result = findDuplicateInVault(
       {
-        metadata: { issuer: 'GEICO', referenceNumber: 'POL-88421-VA' },
-        title: 'Another GEICO packet',
+        metadata: { issuer: 'Progressive', referenceNumber: 'PRG-7788' },
+        title: 'Another Progressive OD packet',
       },
       MOCK_VAULT_INDEX.documents,
     );
@@ -24,9 +24,11 @@ describe('dedup', () => {
   });
 
   it('dedupes a scan batch against vault and itself', () => {
+    const bill = MOCK_SCAN_CANDIDATES.find((c) => c.classification?.category === 'Bills')!;
+    const vehicle = MOCK_SCAN_CANDIDATES.find((c) => c.id === 'scan_ka01_od')!;
     const batch: ScanCandidate[] = [
       {
-        ...MOCK_SCAN_CANDIDATES[1],
+        ...bill,
         id: 'a',
         contentRef: 'same-hash',
         status: 'pending',
@@ -39,7 +41,7 @@ describe('dedup', () => {
         },
       },
       {
-        ...MOCK_SCAN_CANDIDATES[1],
+        ...bill,
         id: 'b',
         contentRef: 'same-hash',
         status: 'pending',
@@ -52,14 +54,14 @@ describe('dedup', () => {
         },
       },
       {
-        ...MOCK_SCAN_CANDIDATES[0],
+        ...vehicle,
         id: 'c',
         contentRef: 'unique-hash',
         status: 'pending',
         classification: {
           category: 'Insurance/Vehicle',
-          title: 'GEICO Vehicle Policy',
-          metadata: { issuer: 'GEICO', referenceNumber: 'POL-88421-VA' },
+          title: 'Progressive Standalone OD',
+          metadata: { issuer: 'Progressive', referenceNumber: 'PRG-7788' },
           confidence: 0.9,
           isImportantDocument: true,
         },
@@ -72,4 +74,3 @@ describe('dedup', () => {
     expect(result[2].status).toBe('duplicate');
   });
 });
-

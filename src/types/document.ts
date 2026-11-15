@@ -38,6 +38,30 @@ export interface DocumentMetadata {
   issueDate?: string; // ISO date YYYY-MM-DD
   expiryDate?: string; // ISO date YYYY-MM-DD
   renewalDate?: string;
+  /** Vehicle registration / plate (primary vehicle subject) */
+  registrationNumber?: string;
+  chassisNumber?: string;
+  engineNumber?: string;
+  vehicleMakeModel?: string;
+  /** Property / device / other entity identifiers */
+  propertyAddress?: string;
+  deviceSerial?: string;
+  /**
+   * Stable entity key for grouping versions of the same document subject
+   * (e.g. vehicle:reg:ka01ab1234). Prefer subject over policy number —
+   * policy numbers change on renewal / insurer switch.
+   */
+  subjectKey?: string;
+  subjectLabel?: string;
+  subjectConfidence?: string; // "0"–"1" as string for index JSON simplicity
+  /**
+   * Multi-part coverage (generic). For vehicle insurance:
+   * comprehensive | od_only | tp_only
+   */
+  coverageType?: string;
+  /** Comma-separated slot ids this document fills (e.g. "own_damage,third_party") */
+  coverageSlots?: string;
+  policyStartDate?: string;
   notes?: string;
   [key: string]: string | undefined;
 }
@@ -85,6 +109,14 @@ export interface ClassificationResult {
   reason?: string;
 }
 
+export type ScanCandidateStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'duplicate'
+  | 'skipped'
+  | 'needs_subject_confirm';
+
 export interface ScanCandidate {
   id: string;
   gmailMessageId: string;
@@ -97,10 +129,20 @@ export interface ScanCandidate {
   sizeBytes: number;
   previewSnippet?: string;
   classification?: ClassificationResult;
-  status: 'pending' | 'approved' | 'rejected' | 'duplicate' | 'skipped';
+  status: ScanCandidateStatus;
   duplicateOfId?: string;
   /** Base64 or mock content handle for saving */
   contentRef?: string;
+  /** Entity grouping (document type + subject key) */
+  groupId?: string;
+  groupLabel?: string;
+  /** True when this candidate is the latest in its group */
+  isGroupLatest?: boolean;
+  /** Other version candidate ids in the same group (older) */
+  olderVersionIds?: string[];
+  groupVersionCount?: number;
+  /** Ambiguous subject — user should confirm/merge */
+  subjectAmbiguous?: boolean;
 }
 
 export interface SyncSuggestion {

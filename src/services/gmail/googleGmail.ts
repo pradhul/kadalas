@@ -1,5 +1,10 @@
 import { getAuthService } from '../auth';
-import { GmailAttachmentContent, GmailAttachmentMeta, GmailService } from './types';
+import {
+  GmailAttachmentContent,
+  GmailAttachmentMeta,
+  GmailSearchPage,
+  GmailService,
+} from './types';
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1';
 
@@ -30,7 +35,10 @@ interface MessagePart {
   parts?: MessagePart[];
 }
 
-function walkParts(part: MessagePart, acc: Array<{ filename: string; mimeType: string; attachmentId: string; size: number }>) {
+function walkParts(
+  part: MessagePart,
+  acc: Array<{ filename: string; mimeType: string; attachmentId: string; size: number }>,
+) {
   if (part.filename && part.body?.attachmentId) {
     acc.push({
       filename: part.filename,
@@ -42,62 +50,78 @@ function walkParts(part: MessagePart, acc: Array<{ filename: string; mimeType: s
   for (const child of part.parts || []) walkParts(child, acc);
 }
 
+async function loadMessageAttachments(messageId: string): Promise<GmailAttachmentMeta[]> {
+  const detailRes = await gmailFetch(`/users/me/messages/${messageId}?format=full`);
+  const detail = (await detailRes.json()) as {
+    id: string;
+    snippet?: string;
+    internalDate?: string;
+    payload?: MessagePart & { headers?: Array<{ name: string; value: string }> };
+  };
+
+  const attachments: Array<{ filename: string; mimeType: string; attachmentId: string; size: number }> = [];
+  if (detail.payload) walkParts(detail.payload, attachments);
+  if (!attachments.length) return [];
+
+  const subject = headerValue(detail.payload?.headers, 'Subject');
+  const from = headerValue(detail.payload?.headers, 'From');
+  const dateHeader = headerValue(detail.payload?.headers, 'Date');
+  const date = detail.internalDate
+    ? new Date(Number(detail.internalDate)).toISOString()
+    : new Date(dateHeader || Date.now()).toISOString();
+
+  return attachments.map((att) => ({
+    messageId: detail.id,
+    attachmentId: att.attachmentId,
+    filename: att.filename,
+    mimeType: att.mimeType,
+    size: att.size,
+    subject,
+    from,
+    date,
+    snippet: detail.snippet || '',
+  }));
+}
+
 export function createGoogleGmailService(): GmailService {
   return {
-    async searchMessagesWithAttachments({ query, maxResults = 25 }) {
-      const listRes = await gmailFetch(
-        `/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`,
-      );
-      const list = (await listRes.json()) as { messages?: Array<{ id: string }> };
-      const results: GmailAttachmentMeta[] = [];
+    async searchAttachmentsPage({ query, maxResults = 50, pageToken }): Promise<GmailSearchPage> {
+      const params = new URLSearchParams({
+        q: query,
+        maxResults: String(maxResults),
+      });
+      if (pageToken) params.set('pageToken', pageToken);
 
+      const listRes = await gmailFetch(`/users/me/messages?${params.toString()}`);
+      const list = (await listRes.json()) as {
+        messages?: Array<{ id: string }>;
+        nextPageToken?: string;
+        resultSizeEstimate?: number;
+      };
+
+      const attachments: GmailAttachmentMeta[] = [];
       for (const msg of list.messages || []) {
-        const detailRes = await gmailFetch(
-          `/users/me/messages/${msg.id}?format=full`,
-        );
-        const detail = (await detailRes.json()) as {
-          id: string;
-          snippet?: string;
-          internalDate?: string;
-          payload?: MessagePart & { headers?: Array<{ name: string; value: string }> };
-        };
-
-        const attachments: Array<{ filename: string; mimeType: string; attachmentId: string; size: number }> = [];
-        if (detail.payload) walkParts(detail.payload, attachments);
-        if (!attachments.length) continue;
-
-        const subject = headerValue(detail.payload?.headers, 'Subject');
-        const from = headerValue(detail.payload?.headers, 'From');
-        const dateHeader = headerValue(detail.payload?.headers, 'Date');
-        const date = detail.internalDate
-          ? new Date(Number(detail.internalDate)).toISOString()
-          : new Date(dateHeader || Date.now()).toISOString();
-
-        for (const att of attachments) {
-          results.push({
-            messageId: detail.id,
-            attachmentId: att.attachmentId,
-            filename: att.filename,
-            mimeType: att.mimeType,
-            size: att.size,
-            subject,
-            from,
-            date,
-            snippet: detail.snippet || '',
-          });
-        }
+        const atts = await loadMessageAttachments(msg.id);
+        attachments.push(...atts);
       }
 
-      return results;
+      return {
+        attachments,
+        nextPageToken: list.nextPageToken ?? null,
+        estimatedTotal: list.resultSizeEstimate ?? null,
+        messagesInPage: list.messages?.length ?? 0,
+      };
+    },
+
+    async searchMessagesWithAttachments(options) {
+      const page = await this.searchAttachmentsPage({ ...options, pageToken: null });
+      return page.attachments;
     },
 
     async getAttachment(messageId, attachmentId) {
-      const metaList = await this.searchMessagesWithAttachments({
-        query: `rfc822msgid:${messageId}`,
-        maxResults: 1,
-      });
-      // Fallback metadata fetch
-      const detailRes = await gmailFetch(`/users/me/messages/${messageId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`);
+      const detailRes = await gmailFetch(
+        `/users/me/messages/${messageId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+      );
       const detail = (await detailRes.json()) as {
         id: string;
         snippet?: string;
@@ -107,8 +131,6 @@ export function createGoogleGmailService(): GmailService {
 
       const attRes = await gmailFetch(`/users/me/messages/${messageId}/attachments/${attachmentId}`);
       const att = (await attRes.json()) as { data: string; size?: number };
-
-      // Gmail returns base64url
       const dataBase64 = att.data.replace(/-/g, '+').replace(/_/g, '/');
 
       const subject = headerValue(detail.payload?.headers, 'Subject');
@@ -117,7 +139,9 @@ export function createGoogleGmailService(): GmailService {
         ? new Date(Number(detail.internalDate)).toISOString()
         : new Date().toISOString();
 
-      const known = metaList[0];
+      const full = await loadMessageAttachments(messageId);
+      const known = full.find((a) => a.attachmentId === attachmentId);
+
       return {
         messageId,
         attachmentId,

@@ -16,6 +16,7 @@ import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
 import { buildFolderTree } from '../../lib/folders';
+import { buildVehicleCoverViews } from '../../lib/grouping';
 import { VAULT_CATEGORIES, VaultCategory } from '../../types/document';
 
 export default function VaultHomeScreen() {
@@ -35,6 +36,8 @@ export default function VaultHomeScreen() {
     for (const doc of documents) map[doc.category] = (map[doc.category] || 0) + 1;
     return map;
   }, [documents]);
+
+  const vehicles = useMemo(() => buildVehicleCoverViews(documents), [documents]);
 
   const topFolders = buildFolderTree().children;
 
@@ -82,6 +85,22 @@ export default function VaultHomeScreen() {
             onRefresh={refresh}
             ListHeaderComponent={
               <View style={styles.recentBlock}>
+                {vehicles.length ? (
+                  <View style={{ marginBottom: spacing.lg }}>
+                    <Text style={styles.sectionLabel}>Vehicles</Text>
+                    {vehicles.map((v) => (
+                      <Pressable
+                        key={v.subjectKey}
+                        style={styles.vehicleRow}
+                        testID={`vehicle-row-${v.subjectKey}`}
+                        onPress={() => router.push(`/vehicle/${encodeURIComponent(v.subjectKey)}`)}
+                      >
+                        <Text style={styles.recentTitle}>{v.subjectLabel}</Text>
+                        <Text style={styles.recentMeta}>{v.summary}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
                 <Text style={styles.sectionLabel}>Recent</Text>
                 {documents
                   .slice()
@@ -200,6 +219,12 @@ const styles = StyleSheet.create({
   },
   recentTitle: { ...typography.bodyStrong, color: colors.ink },
   recentMeta: { ...typography.caption, color: colors.inkMuted, marginTop: 2 },
+  vehicleRow: {
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+    gap: 4,
+  },
   folderCard: {
     backgroundColor: colors.paperElevated,
     borderRadius: radii.lg,

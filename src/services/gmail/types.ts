@@ -18,9 +18,20 @@ export interface GmailAttachmentContent extends GmailAttachmentMeta {
 export interface GmailSearchOptions {
   query: string;
   maxResults?: number;
+  pageToken?: string | null;
+}
+
+export interface GmailSearchPage {
+  attachments: GmailAttachmentMeta[];
+  nextPageToken: string | null;
+  /** Approximate total messages matching the query when available */
+  estimatedTotal: number | null;
+  messagesInPage: number;
 }
 
 export interface GmailService {
   searchMessagesWithAttachments(options: GmailSearchOptions): Promise<GmailAttachmentMeta[]>;
+  /** Paginated search used by the resumable full-mailbox scan. */
+  searchAttachmentsPage(options: GmailSearchOptions): Promise<GmailSearchPage>;
   getAttachment(messageId: string, attachmentId: string): Promise<GmailAttachmentContent>;
 }
