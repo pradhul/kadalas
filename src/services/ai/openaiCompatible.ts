@@ -9,13 +9,15 @@ interface CompatibleConfig {
   displayName: string;
   baseUrl: string;
   model: string;
+  /** Optional model to try once if the primary returns 404 / model-not-found. */
+  fallbackModel?: string;
   getApiKey: () => Promise<string | null>;
   /** anthropic uses x-api-key + anthropic-version */
   style: 'openai' | 'anthropic';
 }
 
 /**
- * Pluggable OpenAI / OpenRouter / Anthropic providers.
+ * Pluggable OpenAI / OpenRouter / Anthropic / Groq providers.
  * File bytes are described in text when the API path is chat-completions style;
  * prefer Gemini for direct PDF/image multimodal when available.
  */
@@ -76,28 +78,98 @@ export function createOpenAiCompatibleProvider(config: CompatibleConfig): AiProv
   };
 }
 
+export async function formatProviderHttpError(
+  providerLabel: string,
+  res: Response,
+): Promise<Error & { status: number }> {
+  let detail = res.statusText || 'request failed';
+  const text = await res.text().catch(() => '');
+  if (text) {
+    try {
+      const body = JSON.parse(text) as {
+        error?: { message?: string; type?: string; code?: string } | string;
+        message?: string;
+      };
+      if (typeof body.error === 'string') detail = body.error;
+      else if (body.error && typeof body.error === 'object' && body.error.message) detail = body.error.message;
+      else if (body.message) detail = body.message;
+      else detail = text.slice(0, 300);
+    } catch {
+      detail = text.slice(0, 300);
+    }
+  }
+  const err = new Error(`${providerLabel} ${res.status}: ${detail}`) as Error & { status: number };
+  err.status = res.status;
+  return err;
+}
+
+function isModelMissing(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: number; message?: string };
+  if (e.status === 404) return true;
+  const msg = (e.message || '').toLowerCase();
+  return msg.includes('model') && (msg.includes('not found') || msg.includes('does not exist') || msg.includes('invalid'));
+}
+
+function isResponseFormatRejected(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: number; message?: string };
+  if (e.status !== 400) return false;
+  const msg = (e.message || '').toLowerCase();
+  return (
+    msg.includes('response_format') ||
+    msg.includes('json_object') ||
+    msg.includes('response format') ||
+    msg.includes('structured output')
+  );
+}
+
 async function chat(config: CompatibleConfig, key: string, userContent: string): Promise<string> {
   if (config.style === 'anthropic') {
-    const res = await fetch(`${config.baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: userContent }],
-      }),
-    });
-    if (!res.ok) {
-      const err = new Error(`Anthropic error ${res.status}`) as Error & { status: number };
-      err.status = res.status;
-      throw err;
-    }
-    const data = (await res.json()) as { content?: Array<{ text?: string }> };
-    return data.content?.map((c) => c.text || '').join('') || '{}';
+    return anthropicChat(config, key, userContent);
+  }
+  return openAiStyleChat(config, key, userContent, config.model, true);
+}
+
+async function anthropicChat(config: CompatibleConfig, key: string, userContent: string): Promise<string> {
+  const res = await fetch(`${config.baseUrl}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      // Required for browser / SPA calls without a backend proxy
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: userContent }],
+    }),
+  });
+  if (!res.ok) throw await formatProviderHttpError('Anthropic', res);
+  const data = (await res.json()) as { content?: Array<{ text?: string }> };
+  return data.content?.map((c) => c.text || '').join('') || '{}';
+}
+
+async function openAiStyleChat(
+  config: CompatibleConfig,
+  key: string,
+  userContent: string,
+  model: string,
+  useResponseFormat: boolean,
+): Promise<string> {
+  const label = config.displayName || 'OpenAI-compatible';
+  const body: Record<string, unknown> = {
+    model,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: 'You classify personal documents. Reply with JSON only.' },
+      { role: 'user', content: userContent },
+    ],
+  };
+  if (useResponseFormat) {
+    body.response_format = { type: 'json_object' };
   }
 
   const res = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -106,21 +178,24 @@ async function chat(config: CompatibleConfig, key: string, userContent: string):
       'Content-Type': 'application/json',
       Authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify({
-      model: config.model,
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: 'You classify personal documents. Reply with JSON only.' },
-        { role: 'user', content: userContent },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
+
   if (!res.ok) {
-    const err = new Error(`OpenAI-compatible error ${res.status}`) as Error & { status: number };
-    err.status = res.status;
+    const err = await formatProviderHttpError(label, res);
+    if (useResponseFormat && isResponseFormatRejected(err)) {
+      return openAiStyleChat(config, key, userContent, model, false);
+    }
+    if (
+      config.fallbackModel &&
+      model === config.model &&
+      isModelMissing(err)
+    ) {
+      return openAiStyleChat(config, key, userContent, config.fallbackModel, useResponseFormat);
+    }
     throw err;
   }
+
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data.choices?.[0]?.message?.content || '{}';
 }

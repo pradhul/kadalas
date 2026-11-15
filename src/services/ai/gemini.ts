@@ -1,4 +1,4 @@
-import { classifyWithRules, mergeClassification } from '../../lib/categorisation';
+import { classifyWithRules, mergeClassification, shouldConsiderAttachment } from '../../lib/categorisation';
 import { normalizeCategory } from '../../lib/folders';
 import { isNewerVersion, scoreDocumentMatch } from '../../lib/matching';
 import { ClassificationResult } from '../../types/document';
@@ -10,10 +10,83 @@ import {
   VersionConfirmInput,
   VersionConfirmResult,
 } from './types';
-import { shouldConsiderAttachment } from '../../lib/categorisation';
 
-const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+/** Default Gemini model (verified against Google AI Studio docs). */
+export const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+/** Alias fallback when the pinned model returns 404 / NOT_FOUND. */
+export const GEMINI_FALLBACK_MODEL = 'gemini-flash-latest';
+
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+function geminiUrl(model: string, key: string): string {
+  return `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(key)}`;
+}
+
+/**
+ * Parse Gemini error JSON and throw `Gemini <status>: <message>` with `.status` preserved
+ * so 429 / RESOURCE_EXHAUSTED still count as quota.
+ */
+export async function throwGeminiHttpError(res: Response): Promise<never> {
+  let detail = res.statusText || 'request failed';
+  const text = await res.text().catch(() => '');
+  if (text) {
+    try {
+      const body = JSON.parse(text) as {
+        error?: { message?: string; status?: string; code?: number };
+      };
+      if (body.error?.message) detail = body.error.message;
+      else if (body.error?.status) detail = body.error.status;
+      else detail = text.slice(0, 300);
+    } catch {
+      detail = text.slice(0, 300);
+    }
+  }
+  const err = new Error(`Gemini ${res.status}: ${detail}`) as Error & {
+    status: number;
+    code?: string;
+  };
+  err.status = res.status;
+  if (/RESOURCE_EXHAUSTED/i.test(detail)) err.code = 'RESOURCE_EXHAUSTED';
+  throw err;
+}
+
+function isModelNotFound(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: number; message?: string };
+  if (e.status === 404) return true;
+  const msg = (e.message || '').toLowerCase();
+  return msg.includes('not_found') || msg.includes('not found') || msg.includes('is not found');
+}
+
+async function geminiFetch(
+  key: string,
+  body: Record<string, unknown>,
+  model: string = GEMINI_DEFAULT_MODEL,
+): Promise<Response> {
+  const res = await fetch(geminiUrl(model, key), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) return res;
+
+  try {
+    await throwGeminiHttpError(res);
+  } catch (err) {
+    if (model !== GEMINI_FALLBACK_MODEL && isModelNotFound(err)) {
+      const retry = await fetch(geminiUrl(GEMINI_FALLBACK_MODEL, key), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (retry.ok) return retry;
+      await throwGeminiHttpError(retry);
+    }
+    throw err;
+  }
+  // unreachable
+  throw new Error('Gemini request failed');
+}
 
 export function createGeminiProvider(getApiKey: () => Promise<string | null>): AiProvider {
   return {
@@ -57,20 +130,10 @@ Skip promos/newsletters (isImportantDocument=false).`;
         });
       }
 
-      const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts }],
-          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
-        }),
+      const res = await geminiFetch(key, {
+        contents: [{ role: 'user', parts }],
+        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
       });
-
-      if (!res.ok) {
-        const err = new Error(`Gemini error ${res.status}`) as Error & { status: number };
-        err.status = res.status;
-        throw err;
-      }
 
       const data = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -98,19 +161,10 @@ Items:\n${JSON.stringify(
         })),
       )}`;
 
-      const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
-        }),
+      const res = await geminiFetch(key, {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
       });
-      if (!res.ok) {
-        const err = new Error(`Gemini error ${res.status}`) as Error & { status: number };
-        err.status = res.status;
-        throw err;
-      }
       const data = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       };
@@ -137,19 +191,10 @@ Existing: ${JSON.stringify(input.existing)}
 Candidate: ${JSON.stringify(input.candidate)}
 Return ONLY JSON: { isSamePolicy, isNewer, confidence, reason, classification: { category, title, issuer, documentType, referenceNumber, holderName, issueDate, expiryDate, isImportantDocument } }`;
 
-      const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(key)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
-        }),
+      const res = await geminiFetch(key, {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
       });
-      if (!res.ok) {
-        const err = new Error(`Gemini error ${res.status}`) as Error & { status: number };
-        err.status = res.status;
-        throw err;
-      }
       const data = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       };
@@ -252,7 +297,8 @@ function str(value: unknown): string | undefined {
   return s || undefined;
 }
 
-function ruleTriage(items: TriageItemInput[]): TriageItemResult[] {
+/** Rule-based triage used when AI is unavailable or triage fails non-fatally. */
+export function ruleTriage(items: TriageItemInput[]): TriageItemResult[] {
   return items.map((item) => {
     const att = item.attachment;
     const keep = shouldConsiderAttachment({

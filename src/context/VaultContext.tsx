@@ -117,7 +117,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const startMailboxScan = useCallback(
     async (options: { mode: ScanMode; lookbackDays?: number; mockQuotaAfter?: number }) => {
-      if (!index) return;
+      if (!index) {
+        throw new Error('Vault not loaded from Google Drive — reconnect');
+      }
       await clearScanJobState();
       await getScanEngine().start({
         mode: options.mode,
@@ -132,7 +134,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   );
 
   const resumeMailboxScan = useCallback(async () => {
-    if (!index) return;
+    if (!index) {
+      throw new Error('Vault not loaded from Google Drive — reconnect');
+    }
     await getScanEngine().resume(index);
   }, [index]);
 

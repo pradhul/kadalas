@@ -1,6 +1,6 @@
 # Kadalas
 
-**v0.1.2 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
+**v0.1.3 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
 
 There is **no app-owned backend or database**:
 
@@ -95,9 +95,9 @@ When the build is in real mode (`EXPO_PUBLIC_USE_MOCKS=false`), the sign-in scre
 
 | Provider | Tier | Get a key |
 | -------- | ---- | --------- |
-| Google AI Studio (Gemini) | Free (recommended default) | https://aistudio.google.com/apikey |
-| OpenRouter | Free models (`:free`) | https://openrouter.ai/keys |
-| Groq | Free tier (OpenAI-compatible) | https://console.groq.com/keys |
+| Google AI Studio (Gemini) | Free (recommended default; `gemini-3.5-flash-lite`) | https://aistudio.google.com/apikey |
+| OpenRouter | Free router (`openrouter/free`) | https://openrouter.ai/keys |
+| Groq | Free tier (`openai/gpt-oss-20b`) | https://console.groq.com/keys |
 | OpenAI | Paid | https://platform.openai.com/api-keys |
 | Anthropic | Paid | https://console.anthropic.com/settings/keys |
 

@@ -20,7 +20,7 @@ import {
 } from '../lib/scanPipeline';
 import { ScanMode, ScanJobState } from '../types/scan';
 import { ScanCandidate, VaultIndex } from '../types/document';
-import { getAiService } from './ai';
+import { getAiService, ruleTriage } from './ai';
 import { isAuthError } from './auth/errors';
 import { getGmailService } from './gmail';
 import { clearScanJobState, loadScanJobState, saveScanJobState } from './scanPersist';
@@ -215,20 +215,35 @@ export class ScanEngine {
     }
 
     const ai = getAiService();
-    const decisions = await ai.triageBatch(
-      batch.map((b) => ({
-        id: b.id,
-        attachment: {
-          from: b.attachment.from,
-          subject: b.attachment.subject,
-          filename: b.attachment.filename,
-          mimeType: b.attachment.mimeType,
-          snippet: b.attachment.snippet,
-          size: b.attachment.size,
-        },
-      })),
-    );
-    const next = applyTriageBatch(this.state, decisions);
+    const triageInput = batch.map((b) => ({
+      id: b.id,
+      attachment: {
+        from: b.attachment.from,
+        subject: b.attachment.subject,
+        filename: b.attachment.filename,
+        mimeType: b.attachment.mimeType,
+        snippet: b.attachment.snippet,
+        size: b.attachment.size,
+      },
+    }));
+
+    let decisions;
+    let warning: string | null = null;
+    try {
+      decisions = await ai.triageBatch(triageInput);
+    } catch (err) {
+      if (isQuotaError(err) || isAuthError(err)) throw err;
+      // Non-fatal (e.g. model 404) — fall back to rule triage so the scan can finish
+      decisions = ruleTriage(triageInput);
+      warning =
+        err instanceof Error
+          ? `AI triage unavailable (${err.message}); using rule triage`
+          : 'AI triage unavailable; using rule triage';
+    }
+    const next = {
+      ...applyTriageBatch(this.state, decisions),
+      lastWarning: warning ?? this.state.lastWarning ?? null,
+    };
     this.emit(next);
   }
 

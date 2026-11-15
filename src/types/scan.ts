@@ -85,6 +85,8 @@ export interface ScanJobState {
   cancelled: boolean;
   /** Last vault index snapshot time used for incremental */
   sinceIso: string | null;
+  /** Non-fatal scan warning (e.g. AI triage fell back to rules) */
+  lastWarning?: string | null;
 }
 
 export const SCAN_STATE_FILENAME = 'scan-state.json';

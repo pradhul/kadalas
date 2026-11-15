@@ -70,9 +70,20 @@ export const AI_PROVIDER_OPTIONS: AiProviderOption[] = [
   },
 ];
 
-/** Sensible free OpenRouter model (ids ending in :free). */
-export const OPENROUTER_DEFAULT_MODEL = 'meta-llama/llama-3.2-3b-instruct:free';
+/**
+ * OpenRouter free router (picks a live free model).
+ * Fallback if the router rejects: google/gemma-4-31b-it:free
+ */
+export const OPENROUTER_DEFAULT_MODEL = 'openrouter/free';
+export const OPENROUTER_FALLBACK_MODEL = 'google/gemma-4-31b-it:free';
 
-/** Fast Groq free-tier chat model. */
-export const GROQ_DEFAULT_MODEL = 'llama-3.1-8b-instant';
+/** Groq production chat model (openai/gpt-oss-20b). */
+export const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b';
 export const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+
+/** Shut-down model IDs — tests assert defaults are not these. */
+export const SHUTDOWN_MODEL_IDS = [
+  'gemini-2.0-flash',
+  'llama-3.1-8b-instant',
+  'meta-llama/llama-3.2-3b-instruct:free',
+] as const;

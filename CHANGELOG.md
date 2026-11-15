@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-11-15
+
+### Fixed
+
+- Replaced shut-down AI model IDs: Gemini → `gemini-3.5-flash-lite` (fallback `gemini-flash-latest`), Groq → `openai/gpt-oss-20b`, OpenRouter → `openrouter/free` (fallback `google/gemma-4-31b-it:free`)
+- Provider errors now include response body (`Gemini 404: …`) with `.status` so quota detection still works
+- Scan **triage** no longer aborts the whole job on non-quota AI failures (e.g. model 404); falls back to rule triage and continues to review/vault
+- Settings **Test key** maps 400/404/429 to friendly copy
+- Starting a scan when the Drive vault index is missing throws a visible reconnect error
+- After GIS token grant, verify Gmail + Drive scopes via `hasGrantedAllScopes`
+- Anthropic browser calls send `anthropic-dangerous-direct-browser-access: true`; retry without `response_format` on 400
+
+### Changed
+
+- Version bump to **0.1.3**
+
 ## [0.1.2] - 2026-11-15
 
 ### Fixed
@@ -65,6 +81,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.3]: https://github.com/pradhul/kadalas/releases/tag/v0.1.3
 [0.1.2]: https://github.com/pradhul/kadalas/releases/tag/v0.1.2
 [0.1.1]: https://github.com/pradhul/kadalas/releases/tag/v0.1.1
 [0.1.0]: https://github.com/pradhul/kadalas/releases/tag/v0.1.0

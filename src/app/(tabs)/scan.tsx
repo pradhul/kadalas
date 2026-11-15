@@ -140,6 +140,7 @@ export default function ScanScreen() {
             </View>
           ) : null}
 
+          {scanJob?.lastWarning ? <Banner tone="warn">{scanJob.lastWarning}</Banner> : null}
           {error ? <Banner tone="warn">{error}</Banner> : null}
 
           {!hasPriorScan ? (

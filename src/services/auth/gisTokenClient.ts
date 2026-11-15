@@ -25,8 +25,15 @@ type GisOauth2 = {
     callback: (response: GisTokenResponse) => void;
     error_callback?: (error: { type?: string; message?: string }) => void;
   }) => TokenClient;
+  hasGrantedAllScopes?: (tokenResponse: GisTokenResponse, ...scopes: string[]) => boolean;
   revoke?: (token: string, done?: () => void) => void;
 };
+
+/** Scopes the app needs for Drive vault + Gmail scan (exclude openid/profile/email for the check). */
+export const GIS_REQUIRED_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/drive.file',
+] as const;
 
 declare global {
   interface Window {
@@ -109,6 +116,21 @@ export async function requestGisAccessToken(options: {
             reject(new Error(detail));
             return;
           }
+
+          const granted =
+            typeof oauth2.hasGrantedAllScopes === 'function'
+              ? oauth2.hasGrantedAllScopes(response, ...GIS_REQUIRED_SCOPES)
+              : hasScopesInTokenResponse(response, GIS_REQUIRED_SCOPES);
+
+          if (!granted) {
+            reject(
+              new Error(
+                'Google did not grant Gmail and Drive access. Allow both permissions and try again.',
+              ),
+            );
+            return;
+          }
+
           resolve({
             accessToken: response.access_token,
             expiresIn: response.expires_in ?? 3600,
@@ -138,6 +160,17 @@ export async function requestGisAccessToken(options: {
       settle(() => reject(e instanceof Error ? e : new Error(String(e))));
     }
   });
+}
+
+/** Fallback when hasGrantedAllScopes is unavailable — inspect the space-delimited scope string. */
+export function hasScopesInTokenResponse(
+  response: { scope?: string },
+  required: readonly string[],
+): boolean {
+  const granted = new Set((response.scope || '').split(/\s+/).filter(Boolean));
+  // Some GIS builds omit scope on the token response; treat as unknown → allow and rely on API 403s.
+  if (granted.size === 0) return true;
+  return required.every((s) => granted.has(s));
 }
 
 export async function revokeGisToken(accessToken: string): Promise<void> {

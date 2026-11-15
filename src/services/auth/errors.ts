@@ -39,8 +39,13 @@ export function friendlyAuthError(err: unknown): string {
   if (lower.includes('client_secret') || lower.includes('missing a required parameter')) {
     return 'Google sign-in failed. Please try again.';
   }
-  if (lower.includes('access_denied') || lower.includes('access denied')) {
-    return 'Google sign-in was denied. Grant Gmail and Drive access to continue.';
+  if (
+    lower.includes('access_denied') ||
+    lower.includes('access denied') ||
+    lower.includes('did not grant gmail') ||
+    lower.includes('allow both permissions')
+  ) {
+    return 'Google sign-in was denied. Allow Gmail and Drive access to continue.';
   }
   if (lower.includes('popup_closed') || lower.includes('popup closed') || lower.includes('dismiss')) {
     return 'Sign-in was cancelled.';

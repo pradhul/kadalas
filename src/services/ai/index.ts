@@ -7,10 +7,12 @@ import {
   GROQ_BASE_URL,
   GROQ_DEFAULT_MODEL,
   OPENROUTER_DEFAULT_MODEL,
+  OPENROUTER_FALLBACK_MODEL,
 } from './catalog';
 import { createGeminiProvider } from './gemini';
 import { createMockAiProvider } from './mockAi';
 import { createOpenAiCompatibleProvider } from './openaiCompatible';
+import { friendlyTestKeyMessage } from './testKeyMessages';
 import { AiProvider, AiService, TriageItemInput } from './types';
 import { MOCK_QUOTA_EVERY_N_AI_CALLS } from '../../mocks/mailbox';
 
@@ -20,8 +22,11 @@ export {
   GROQ_BASE_URL,
   GROQ_DEFAULT_MODEL,
   OPENROUTER_DEFAULT_MODEL,
+  OPENROUTER_FALLBACK_MODEL,
 } from './catalog';
 export type { AiProviderOption, AiProviderTier } from './catalog';
+export { GEMINI_DEFAULT_MODEL, GEMINI_FALLBACK_MODEL, ruleTriage } from './gemini';
+export { friendlyTestKeyMessage } from './testKeyMessages';
 
 function buildProviders(): Record<AiProviderId, AiProvider> {
   return {
@@ -48,6 +53,7 @@ function buildProviders(): Record<AiProviderId, AiProvider> {
       displayName: 'OpenRouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       model: OPENROUTER_DEFAULT_MODEL,
+      fallbackModel: OPENROUTER_FALLBACK_MODEL,
       getApiKey: () => getAiApiKey('openrouter'),
       style: 'openai',
     }),
@@ -186,8 +192,7 @@ export function createAiService(): AiService {
           mockQuotaFailAfter = previousQuota;
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { ok: false, message: msg };
+        return { ok: false, message: friendlyTestKeyMessage(e) };
       }
     },
 

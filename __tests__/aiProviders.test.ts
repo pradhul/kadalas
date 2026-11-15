@@ -20,10 +20,10 @@ describe('AI provider catalog', () => {
     expect(byId.mock.tier).toBe('offline');
   });
 
-  it('defaults OpenRouter to a :free model and Groq to openai-compatible base URL', () => {
-    expect(OPENROUTER_DEFAULT_MODEL.endsWith(':free')).toBe(true);
+  it('defaults OpenRouter to free router and Groq to openai-compatible base URL', () => {
+    expect(OPENROUTER_DEFAULT_MODEL).toBe('openrouter/free');
     expect(GROQ_BASE_URL).toBe('https://api.groq.com/openai/v1');
-    expect(GROQ_DEFAULT_MODEL.length).toBeGreaterThan(3);
+    expect(GROQ_DEFAULT_MODEL).toBe('openai/gpt-oss-20b');
   });
 
   it('lists a get-key CTA for every networked provider', () => {
