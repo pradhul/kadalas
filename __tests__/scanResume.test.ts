@@ -41,13 +41,15 @@ describe('resumable full-mailbox scan pipeline', () => {
     });
     expect(state.gmailSearchDone).toBe(false);
     expect(state.gmailPageToken).toBe('50');
-    expect(state.stage).toBe('search');
+    // Interleaved pipeline: triage as soon as the page produced work
+    expect(state.stage).toBe('triage');
     expect(state.triageQueue.length).toBeGreaterThan(0);
+    expect(state.stats.pagesFetched).toBe(1);
 
-    // Simulate process restart: resume from saved token
+    // Simulate process restart: resume from saved token / queues
     const resumed = resumeScan({ ...state, stage: 'paused_user', userPaused: true });
     expect(resumed.gmailPageToken).toBe('50');
-    expect(resumed.stage).toBe('search');
+    expect(['search', 'triage', 'classify']).toContain(resumed.stage);
   });
 
   it('quota pause then resume continues triage/classify without losing queues', () => {

@@ -2,6 +2,7 @@
  * Google Identity Services token client (web only).
  * Uses the implicit/token flow — no client_secret, suitable for a static SPA.
  */
+import { GIS_SILENT_TIMEOUT_MS, withTimeout } from '../../lib/fetchWithTimeout';
 import { GOOGLE_SCOPES } from '../config';
 import { AuthExpiredError } from './errors';
 
@@ -94,7 +95,7 @@ export async function requestGisAccessToken(options: {
   await loadGisScript();
   const oauth2 = getOauth2();
 
-  return new Promise((resolve, reject) => {
+  const tokenPromise = new Promise<{ accessToken: string; expiresIn: number }>((resolve, reject) => {
     let settled = false;
     const settle = (fn: () => void) => {
       if (settled) return;
@@ -160,6 +161,22 @@ export async function requestGisAccessToken(options: {
       settle(() => reject(e instanceof Error ? e : new Error(String(e))));
     }
   });
+
+  // Silent renew can hang forever on some mobile browsers (e.g. Brave) — time out to AuthExpiredError.
+  if (!options.interactive) {
+    try {
+      return await withTimeout(
+        tokenPromise,
+        GIS_SILENT_TIMEOUT_MS,
+        'Silent Google token renew timed out',
+      );
+    } catch (e) {
+      if (e instanceof AuthExpiredError) throw e;
+      throw new AuthExpiredError('Session expired — tap to reconnect Google', true);
+    }
+  }
+
+  return tokenPromise;
 }
 
 /** Fallback when hasGrantedAllScopes is unavailable — inspect the space-delimited scope string. */

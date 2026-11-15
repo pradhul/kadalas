@@ -8,6 +8,7 @@ import {
   VaultDocument,
   VaultIndex,
 } from '../../types/document';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { SCAN_STATE_FILENAME, ScanJobState } from '../../types/scan';
 import { getAuthService } from '../auth';
 import { DriveFileRef, DriveService, UploadInput } from './types';
@@ -22,7 +23,7 @@ async function authHeaders(): Promise<HeadersInit> {
 
 async function driveFetch(url: string, init: RequestInit = {}) {
   const headers = { ...(await authHeaders()), ...(init.headers || {}) };
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetchWithTimeout(url, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
     const err = new Error(`Drive API ${res.status}: ${text}`) as Error & { status: number };
@@ -235,18 +236,10 @@ export function createGoogleDriveService(): DriveService {
     async saveScanState(state: ScanJobState | null) {
       const s = await ensureStructure();
       const existingId = await findNamedFile(s.vaultFolderId, SCAN_STATE_FILENAME);
-      if (state == null) {
-        if (existingId) {
-          await driveFetch(`${DRIVE}/files/${existingId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ trashed: true }),
-          });
-        }
-        return;
-      }
-      const body = JSON.stringify(state);
+      // Never trash/delete Drive files — overwrite scan-state.json with null or the new body.
+      const body = state == null ? 'null' : JSON.stringify(state);
       if (!existingId) {
+        if (state == null) return;
         const form = buildMultipart(
           { name: SCAN_STATE_FILENAME, parents: [s.vaultFolderId], mimeType: 'application/json' },
           body,
@@ -271,7 +264,9 @@ export function createGoogleDriveService(): DriveService {
       const id = await findNamedFile(s.vaultFolderId, SCAN_STATE_FILENAME);
       if (!id) return null;
       const res = await driveFetch(`${DRIVE}/files/${id}?alt=media`);
-      return (await res.json()) as ScanJobState;
+      const parsed: unknown = await res.json();
+      if (parsed == null) return null;
+      return parsed as ScanJobState;
     },
   };
 }

@@ -1,4 +1,5 @@
 import { classifyWithRules, mergeClassification } from '../../lib/categorisation';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { normalizeCategory } from '../../lib/folders';
 import { isNewerVersion, scoreDocumentMatch } from '../../lib/matching';
 import { AiProviderId, ClassificationResult } from '../../types/document';
@@ -132,7 +133,7 @@ async function chat(config: CompatibleConfig, key: string, userContent: string):
 }
 
 async function anthropicChat(config: CompatibleConfig, key: string, userContent: string): Promise<string> {
-  const res = await fetch(`${config.baseUrl}/messages`, {
+  const res = await fetchWithTimeout(`${config.baseUrl}/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -172,7 +173,7 @@ async function openAiStyleChat(
     body.response_format = { type: 'json_object' };
   }
 
-  const res = await fetch(`${config.baseUrl}/chat/completions`, {
+  const res = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

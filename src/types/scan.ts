@@ -28,7 +28,8 @@ export type PipelineItemStatus =
 
 export interface PipelineItem {
   id: string;
-  attachment: GmailAttachmentMeta;
+  /** Omitted on slimmed filtered/skipped persist entries */
+  attachment?: GmailAttachmentMeta;
   status: PipelineItemStatus;
   triageReason?: string;
   triageConfidence?: number;
@@ -37,9 +38,16 @@ export interface PipelineItem {
   candidateId?: string;
 }
 
+export interface ScanEventLogEntry {
+  at: string;
+  message: string;
+}
+
 export interface ScanStats {
   emailsChecked: number;
   emailsEstimatedTotal: number | null;
+  /** Gmail list pages fetched so far */
+  pagesFetched: number;
   attachmentsFound: number;
   filteredOut: number;
   triageKept: number;
@@ -49,6 +57,8 @@ export interface ScanStats {
   aiCallsUsed: number;
   triageBatches: number;
   classifyCalls: number;
+  /** High-water progress percent — never shrinks mid-job */
+  progressHighWater: number;
 }
 
 export interface QuotaPauseInfo {
@@ -87,6 +97,12 @@ export interface ScanJobState {
   sinceIso: string | null;
   /** Non-fatal scan warning (e.g. AI triage fell back to rules) */
   lastWarning?: string | null;
+  /** Last engine step timestamp (ISO) */
+  lastStepAt?: string | null;
+  /** Last outbound API call summary for the debug card */
+  lastApiCall?: { at: string; label: string; status: string } | null;
+  /** Rolling debug event log (capped) */
+  eventLog?: ScanEventLogEntry[];
 }
 
 export const SCAN_STATE_FILENAME = 'scan-state.json';
@@ -95,6 +111,7 @@ export function emptyScanStats(): ScanStats {
   return {
     emailsChecked: 0,
     emailsEstimatedTotal: null,
+    pagesFetched: 0,
     attachmentsFound: 0,
     filteredOut: 0,
     triageKept: 0,
@@ -104,6 +121,7 @@ export function emptyScanStats(): ScanStats {
     aiCallsUsed: 0,
     triageBatches: 0,
     classifyCalls: 0,
+    progressHighWater: 0,
   };
 }
 

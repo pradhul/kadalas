@@ -33,6 +33,10 @@ interface VaultContextValue {
   resumeMailboxScan: () => Promise<void>;
   pauseMailboxScan: () => Promise<void>;
   cancelMailboxScan: () => Promise<void>;
+  /** Stop engine and overwrite scan-state.json with null (never delete Drive files). */
+  resetMailboxScan: () => Promise<void>;
+  /** Live engine loop flag — false when UI stage looks active but the loop died. */
+  scanEngineRunning: boolean;
   /** @deprecated use startMailboxScan */
   runScan: (lookbackDays?: number) => Promise<ScanCandidate[]>;
   approveCandidates: (ids: string[]) => Promise<void>;
@@ -58,6 +62,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [scanJob, setScanJob] = useState<ScanJobState | null>(null);
   const [lastScanCandidates, setLastScanCandidates] = useState<ScanCandidate[]>([]);
+  const [scanEngineRunning, setScanEngineRunning] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -89,11 +94,21 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setScanJob(s);
         setLastScanCandidates(s.candidates);
       }
+      setScanEngineRunning(engine.isRunning());
     });
     return engine.subscribe((state) => {
       setScanJob({ ...state });
       setLastScanCandidates([...state.candidates]);
+      setScanEngineRunning(engine.isRunning());
     });
+  }, []);
+
+  // Poll isRunning so the UI notices a dead loop even if stage still looks active.
+  useEffect(() => {
+    const t = setInterval(() => {
+      setScanEngineRunning(getScanEngine().isRunning());
+    }, 1000);
+    return () => clearInterval(t);
   }, []);
 
   // Auto-resume after quota pause when resumeAfter has passed and app is open.
@@ -146,6 +161,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const cancelMailboxScan = useCallback(async () => {
     await getScanEngine().cancel();
+  }, []);
+
+  const resetMailboxScan = useCallback(async () => {
+    await getScanEngine().reset();
+    setScanJob(null);
+    setLastScanCandidates([]);
+    setScanEngineRunning(false);
   }, []);
 
   const runScan = useCallback(
@@ -335,6 +357,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       resumeMailboxScan,
       pauseMailboxScan,
       cancelMailboxScan,
+      resetMailboxScan,
+      scanEngineRunning,
       runScan,
       approveCandidates,
       rejectCandidate,
@@ -358,6 +382,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       resumeMailboxScan,
       pauseMailboxScan,
       cancelMailboxScan,
+      resetMailboxScan,
+      scanEngineRunning,
       runScan,
       approveCandidates,
       rejectCandidate,

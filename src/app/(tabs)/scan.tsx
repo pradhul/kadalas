@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, View, Pressable } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Banner, Button, Field, Screen, SectionTitle } from '../../components/ui';
@@ -8,6 +8,22 @@ import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
 import { estimateRemaining, getActiveStageLabel, isAuthPause } from '../../lib/scanPipeline';
 import { useMocks } from '../../services/config';
+import { getAuthTokens } from '../../services/secureStorage';
+
+async function copyText(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  throw new Error('Clipboard unavailable');
+}
+
+function confirmReset(): boolean {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm('Reset this scan? Progress will be cleared (Drive file overwritten, not deleted).');
+  }
+  return true;
+}
 
 export default function ScanScreen() {
   const {
@@ -18,11 +34,15 @@ export default function ScanScreen() {
     resumeMailboxScan,
     pauseMailboxScan,
     cancelMailboxScan,
+    resetMailboxScan,
+    scanEngineRunning,
   } = useVault();
-  const { reconnectGoogle, loading: authLoading, needsReconnect } = useAuth();
+  const { reconnectGoogle, loading: authLoading, needsReconnect, session } = useAuth();
   const [lookback, setLookback] = useState('90');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [tokenExpiresIn, setTokenExpiresIn] = useState<string>('—');
+  const [copied, setCopied] = useState(false);
 
   const hasPriorScan = Boolean(index?.lastScanAt);
   const active =
@@ -32,18 +52,57 @@ export default function ScanScreen() {
   const pausedQuota = scanJob?.stage === 'paused_quota';
   const pausedAuth = isAuthPause(scanJob) || (pausedQuota && needsReconnect);
   const pausedUser = scanJob?.stage === 'paused_user';
-  const running =
-    active && !pausedQuota && !pausedUser && scanJob!.stage !== 'completed';
+  const activeWorkingStages = ['search', 'filter', 'triage', 'classify', 'dedupe'];
+  const stalled =
+    Boolean(scanJob && activeWorkingStages.includes(scanJob.stage) && !scanEngineRunning);
+  const running = scanEngineRunning;
 
   const est = useMemo(() => (scanJob ? estimateRemaining(scanJob) : null), [scanJob]);
   const pendingReview = lastScanCandidates.filter(
     (c) => c.status === 'pending' || c.status === 'needs_subject_confirm',
   ).length;
 
+  const classifyDone = scanJob?.stats.classifyCalls ?? 0;
+  const classifyRemaining = scanJob?.classifyQueue.length ?? 0;
+
+  // Auto-resume stalled jobs when the Scan tab opens.
+  useEffect(() => {
+    if (!index || !stalled) return;
+    void resumeMailboxScan().catch((e) => {
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  }, [index, stalled, resumeMailboxScan]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      if (!session || session.isMock) {
+        if (!cancelled) setTokenExpiresIn('mock');
+        return;
+      }
+      const tokens = await getAuthTokens();
+      if (cancelled) return;
+      if (!tokens?.expiresAt) {
+        setTokenExpiresIn('unknown');
+        return;
+      }
+      const secs = Math.max(0, Math.round((tokens.expiresAt - Date.now()) / 1000));
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      setTokenExpiresIn(`${m}m ${s}s`);
+    };
+    void tick();
+    const t = setInterval(() => void tick(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [session]);
+
   return (
     <Screen>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.content}>
           <SectionTitle
             title="Scan Gmail"
             subtitle="Staged pipeline: search → rules → cheap AI triage → full classify → entity grouping."
@@ -70,15 +129,20 @@ export default function ScanScreen() {
 
           {scanJob && scanJob.stage !== 'idle' ? (
             <View
-              style={[styles.progress, pausedQuota && styles.progressPaused]}
+              style={[styles.progress, (pausedQuota || stalled) && styles.progressPaused]}
               testID="scan-progress-panel"
             >
               <Text style={styles.progressTitle}>
                 {getActiveStageLabel(scanJob.stage, { authPause: pausedAuth })}
+                {stalled ? ' (stalled)' : ''}
               </Text>
               {pausedAuth ? (
                 <Banner tone="warn">
                   Session expired — tap to reconnect Google, then Resume to continue the scan where it left off.
+                </Banner>
+              ) : stalled ? (
+                <Banner tone="warn">
+                  Scan is not running. Tap Resume to continue from the saved page token.
                 </Banner>
               ) : pausedQuota ? (
                 <Banner tone="warn">
@@ -123,7 +187,7 @@ export default function ScanScreen() {
                     }}
                   />
                 ) : null}
-                {(pausedQuota && !pausedAuth) || pausedUser ? (
+                {(pausedQuota && !pausedAuth) || pausedUser || stalled ? (
                   <Button title="Resume" onPress={() => void resumeMailboxScan()} />
                 ) : null}
                 {active && scanJob.stage !== 'completed' ? (
@@ -136,6 +200,76 @@ export default function ScanScreen() {
                     onPress={() => router.push('/scan-review')}
                   />
                 ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {scanJob ? (
+            <View style={styles.debugCard} testID="scan-debug-card">
+              <Text style={styles.debugTitle}>Scan status</Text>
+              <Text style={styles.meta}>Stage: {scanJob.stage}</Text>
+              <Text style={styles.meta}>Engine running: {scanEngineRunning ? 'yes' : 'no'}</Text>
+              <Text style={styles.meta}>Pages fetched: {scanJob.stats.pagesFetched ?? 0}</Text>
+              <Text style={styles.meta}>
+                Attachments found: {scanJob.stats.attachmentsFound} · filtered: {scanJob.stats.filteredOut}
+              </Text>
+              <Text style={styles.meta}>
+                Triage kept / skipped: {scanJob.stats.triageKept} / {scanJob.stats.triageSkipped}
+              </Text>
+              <Text style={styles.meta}>
+                Classify done / remaining: {classifyDone} / {classifyRemaining}
+              </Text>
+              <Text style={styles.meta}>
+                Last step: {scanJob.lastStepAt ? new Date(scanJob.lastStepAt).toLocaleTimeString() : '—'}
+              </Text>
+              <Text style={styles.meta}>
+                Last API: {scanJob.lastApiCall
+                  ? `${scanJob.lastApiCall.label} · ${scanJob.lastApiCall.status}`
+                  : '—'}
+              </Text>
+              <Text style={styles.meta}>Token expires in: {tokenExpiresIn}</Text>
+              <Text style={styles.meta}>Progress: {est?.percent ?? 0}% · {est?.label}</Text>
+
+              <Text style={[styles.debugTitle, { marginTop: spacing.sm }]}>Event log</Text>
+              {(scanJob.eventLog ?? []).slice(-20).map((e, i) => (
+                <Text key={`${e.at}-${i}`} style={styles.logLine}>
+                  {new Date(e.at).toLocaleTimeString()} — {e.message}
+                </Text>
+              ))}
+              {(scanJob.eventLog ?? []).length === 0 ? (
+                <Text style={styles.meta}>No events yet.</Text>
+              ) : null}
+
+              <View style={[styles.row, { marginTop: spacing.sm }]}>
+                <Button
+                  title={copied ? 'Copied' : 'Copy log'}
+                  variant="secondary"
+                  onPress={async () => {
+                    const lines = (scanJob.eventLog ?? []).map(
+                      (e) => `${e.at} ${e.message}`,
+                    );
+                    try {
+                      await copyText(lines.join('\n') || '(empty)');
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : 'Copy failed');
+                    }
+                  }}
+                />
+                <Button
+                  title="Reset scan"
+                  variant="ghost"
+                  onPress={async () => {
+                    if (!confirmReset()) return;
+                    setError(null);
+                    try {
+                      await resetMailboxScan();
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e));
+                    }
+                  }}
+                />
               </View>
             </View>
           ) : null}
@@ -224,7 +358,7 @@ export default function ScanScreen() {
               />
             </View>
           ) : null}
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </Screen>
   );
@@ -232,7 +366,7 @@ export default function ScanScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  content: { padding: spacing.lg, gap: spacing.sm },
+  content: { padding: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xxl },
   meta: { ...typography.caption, color: colors.inkMuted, marginBottom: 4 },
   progress: {
     backgroundColor: colors.paperElevated,
@@ -265,4 +399,15 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   choiceTitle: { ...typography.h3, color: colors.ink },
+  debugCard: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    backgroundColor: colors.paperElevated,
+    gap: 2,
+    marginBottom: spacing.md,
+  },
+  debugTitle: { ...typography.bodyStrong, color: colors.ink, marginBottom: 4 },
+  logLine: { ...typography.caption, color: colors.inkMuted, fontFamily: Platform.OS === 'web' ? 'monospace' : undefined },
 });

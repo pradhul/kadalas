@@ -12,6 +12,7 @@ import {
 import { ClassificationResult, ScanCandidate, VaultDocument } from '../types/document';
 import { enrichCandidateWithSubject, groupCandidatesBySubject } from './grouping';
 import { resolveSubjectKey, applySubjectToMetadata } from './subjectKey';
+import { ruleTriageOne } from './ruleTriage';
 
 export const DEFAULT_TRIAGE_BATCH_SIZE = 12;
 export const DEFAULT_GMAIL_PAGE_SIZE = 50;
@@ -89,6 +90,15 @@ export function ingestSearchPage(
   },
   nowIso: string = new Date().toISOString(),
 ): ScanJobState {
+  const checked = state.stats.emailsChecked + (page.messagesInPage ?? page.attachments.length);
+  // Gmail resultSizeEstimate often under-reports (~201) and resets every page — never shrink.
+  const priorEst = state.stats.emailsEstimatedTotal;
+  const pageEst = page.estimatedTotal ?? null;
+  const emailsEstimatedTotal =
+    pageEst == null
+      ? priorEst
+      : Math.max(priorEst ?? 0, pageEst, checked);
+
   const next: ScanJobState = {
     ...state,
     stage: 'filter',
@@ -97,9 +107,9 @@ export function ingestSearchPage(
     gmailSearchDone: !page.nextPageToken,
     stats: {
       ...state.stats,
-      emailsChecked: state.stats.emailsChecked + (page.messagesInPage ?? page.attachments.length),
-      emailsEstimatedTotal:
-        page.estimatedTotal != null ? page.estimatedTotal : state.stats.emailsEstimatedTotal,
+      emailsChecked: checked,
+      emailsEstimatedTotal,
+      pagesFetched: (state.stats.pagesFetched ?? 0) + 1,
     },
     processedMessageIds: [...state.processedMessageIds],
     triageQueue: [...state.triageQueue],
@@ -129,17 +139,18 @@ export function ingestSearchPage(
     next.triageQueue.push(id);
   }
 
-  if (!next.gmailSearchDone) {
-    next.stage = 'search';
-  } else if (next.triageQueue.length > 0) {
+  // Interleave: triage/classify as soon as this page produced work — don't wait for full mailbox.
+  if (next.triageQueue.length > 0) {
     next.stage = 'triage';
   } else if (next.classifyQueue.length > 0) {
     next.stage = 'classify';
+  } else if (!next.gmailSearchDone) {
+    next.stage = 'search';
   } else {
     next.stage = 'dedupe';
   }
 
-  return next;
+  return bumpProgressHighWater(next);
 }
 
 export interface TriageDecision {
@@ -177,15 +188,26 @@ export function applyTriageBatch(
 
   for (const id of processed) {
     const item = next.items[id];
-    if (!item) continue;
-    const d = decisionMap.get(id);
-    if (!d || !d.isLikelyImportant) {
+    if (!item?.attachment) continue;
+    // Items missing from the AI response fall back to rule triage (not auto-skip).
+    const d =
+      decisionMap.get(id) ??
+      (() => {
+        const rule = ruleTriageOne(item.attachment!);
+        return {
+          id,
+          isLikelyImportant: rule.isLikelyImportant,
+          confidence: rule.confidence,
+          reason: rule.reason,
+        };
+      })();
+    if (!d.isLikelyImportant) {
       next.stats.triageSkipped += 1;
       next.items[id] = {
         ...item,
         status: 'triaged_skip',
-        triageReason: d?.reason || 'Not an important document',
-        triageConfidence: d?.confidence ?? 0,
+        triageReason: d.reason || 'Not an important document',
+        triageConfidence: d.confidence ?? 0,
       };
     } else {
       next.stats.triageKept += 1;
@@ -199,15 +221,13 @@ export function applyTriageBatch(
     }
   }
 
-  next.stage = next.triageQueue.length
-    ? 'triage'
-    : !next.gmailSearchDone
-      ? 'search'
-      : next.classifyQueue.length
-        ? 'classify'
-        : 'dedupe';
+  // Prefer draining triage → classify before fetching the next Gmail page.
+  if (next.triageQueue.length) next.stage = 'triage';
+  else if (next.classifyQueue.length) next.stage = 'classify';
+  else if (!next.gmailSearchDone) next.stage = 'search';
+  else next.stage = 'dedupe';
 
-  return next;
+  return bumpProgressHighWater(next);
 }
 
 /** Take next triage batch of metadata-only payloads. */
@@ -215,10 +235,14 @@ export function takeTriageBatch(
   state: ScanJobState,
   batchSize: number = DEFAULT_TRIAGE_BATCH_SIZE,
 ): Array<{ id: string; attachment: GmailAttachmentMeta }> {
-  return state.triageQueue.slice(0, batchSize).map((id) => ({
-    id,
-    attachment: state.items[id].attachment,
-  }));
+  return state.triageQueue
+    .slice(0, batchSize)
+    .map((id) => {
+      const attachment = state.items[id]?.attachment;
+      if (!attachment) return null;
+      return { id, attachment };
+    })
+    .filter((x): x is { id: string; attachment: GmailAttachmentMeta } => Boolean(x));
 }
 
 export function applyClassificationResult(
@@ -241,6 +265,7 @@ export function applyClassificationResult(
   const finalClassification = { ...classification, metadata };
 
   const att = item.attachment;
+  if (!att) return state;
   let candidate: ScanCandidate = {
     id: `cand_${itemId.replace(/[^a-zA-Z0-9]/g, '_')}`,
     gmailMessageId: att.messageId,
@@ -312,18 +337,19 @@ export function applyClassificationResult(
   else if (!next.gmailSearchDone) next.stage = 'search';
   else next.stage = 'dedupe';
 
-  return next;
+  return bumpProgressHighWater(next);
 }
 
 export function finalizeDedupeGrouping(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
   const grouped = groupCandidatesBySubject(state.candidates);
-  return {
+  return bumpProgressHighWater({
     ...state,
     stage: 'completed',
     updatedAt: nowIso,
     candidates: grouped.flat,
     gmailSearchDone: true,
-  };
+    stats: { ...state.stats, progressHighWater: 100 },
+  });
 }
 
 export function pauseForQuota(
@@ -417,24 +443,66 @@ export function isQuotaError(err: unknown): boolean {
   );
 }
 
+/** Raw stage-weighted progress (search 0–60, triage 60–80, classify 80–100). */
+export function computeStageProgress(state: ScanJobState): number {
+  if (state.stage === 'completed') return 100;
+  if (state.stage === 'cancelled') return state.stats.progressHighWater ?? 0;
+
+  const aboutN = Math.max(
+    state.stats.emailsEstimatedTotal ?? 0,
+    state.stats.emailsChecked,
+    1,
+  );
+  const searchFrac = Math.min(1, state.stats.emailsChecked / aboutN);
+  const searchPct = Math.round(searchFrac * 60);
+
+  const triageDone = state.stats.triageKept + state.stats.triageSkipped;
+  const triageTotal = Math.max(triageDone + state.triageQueue.length, 1);
+  const triageFrac = Math.min(1, triageDone / triageTotal);
+
+  const classifyDone = state.stats.classifyCalls;
+  const classifyTotal = Math.max(classifyDone + state.classifyQueue.length, 1);
+  const classifyFrac = Math.min(1, classifyDone / classifyTotal);
+
+  if (state.stage === 'search' || state.stage === 'filter' || state.stage === 'idle') {
+    return Math.min(59, searchPct);
+  }
+  if (state.stage === 'triage') {
+    return 60 + Math.round(triageFrac * 20);
+  }
+  if (state.stage === 'classify') {
+    return 80 + Math.round(classifyFrac * 19);
+  }
+  if (state.stage === 'dedupe') return 98;
+  // paused_* — hold last computed band from queues/search
+  if (state.classifyQueue.length) return 80 + Math.round(classifyFrac * 19);
+  if (state.triageQueue.length) return 60 + Math.round(triageFrac * 20);
+  return Math.min(59, searchPct);
+}
+
+export function bumpProgressHighWater(state: ScanJobState): ScanJobState {
+  const raw = computeStageProgress(state);
+  const progressHighWater = Math.max(state.stats.progressHighWater ?? 0, raw);
+  if (progressHighWater === state.stats.progressHighWater) return state;
+  return { ...state, stats: { ...state.stats, progressHighWater } };
+}
+
 export function estimateRemaining(state: ScanJobState): {
   percent: number;
   label: string;
 } {
-  const est = state.stats.emailsEstimatedTotal;
-  if (est && est > 0) {
-    const pct = Math.min(99, Math.round((state.stats.emailsChecked / est) * 100));
-    return { percent: state.stage === 'completed' ? 100 : pct, label: `${pct}% of mailbox` };
-  }
-  const pending =
-    (state.gmailSearchDone ? 0 : 1) + state.triageQueue.length + state.classifyQueue.length;
-  const done = state.stats.attachmentsFound - state.triageQueue.length - state.classifyQueue.length;
-  const total = Math.max(state.stats.attachmentsFound, 1);
-  const pct = state.stage === 'completed' ? 100 : Math.min(95, Math.round((done / total) * 80));
-  return {
-    percent: pct,
-    label: pending ? `${pending} items left in queues` : 'Finishing…',
-  };
+  const aboutN = Math.max(state.stats.emailsEstimatedTotal ?? 0, state.stats.emailsChecked, 0);
+  const percent =
+    state.stage === 'completed'
+      ? 100
+      : Math.max(state.stats.progressHighWater ?? 0, computeStageProgress(state));
+  const label =
+    state.stage === 'completed'
+      ? 'Done'
+      : aboutN > 0
+        ? `about ${aboutN} emails · ${state.stats.pagesFetched || 0} pages`
+        : `${state.stats.pagesFetched || 0} pages fetched`;
+  return { percent, label };
 }
 
 export function getActiveStageLabel(stage: ScanStage, opts?: { authPause?: boolean }): string {

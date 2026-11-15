@@ -33,5 +33,13 @@ export interface GmailService {
   searchMessagesWithAttachments(options: GmailSearchOptions): Promise<GmailAttachmentMeta[]>;
   /** Paginated search used by the resumable full-mailbox scan. */
   searchAttachmentsPage(options: GmailSearchOptions): Promise<GmailSearchPage>;
-  getAttachment(messageId: string, attachmentId: string): Promise<GmailAttachmentContent>;
+  /**
+   * Download attachment bytes. Pass `knownMeta` from the scan index to avoid
+   * re-fetching the full message for filename/subject/mime.
+   */
+  getAttachment(
+    messageId: string,
+    attachmentId: string,
+    knownMeta?: Partial<GmailAttachmentMeta>,
+  ): Promise<GmailAttachmentContent>;
 }

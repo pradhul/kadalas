@@ -1,6 +1,7 @@
 import * as ExpoAuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { getGoogleOAuthConfig, getOAuthRedirectUri, GOOGLE_SCOPES } from '../config';
 import { clearAuthTokens, getAuthTokens, saveAuthTokens, StoredTokens } from '../secureStorage';
 import { emitAuthEvent } from './authEvents';
@@ -38,7 +39,7 @@ function toSession(tokens: StoredTokens): AuthSession {
 }
 
 async function fetchUserInfo(accessToken: string): Promise<{ email: string; name: string; picture?: string }> {
-  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+  const res = await fetchWithTimeout('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Failed to load Google profile (${res.status})`);
@@ -60,7 +61,7 @@ async function refreshAccessTokenNative(refreshToken: string): Promise<StoredTok
     refresh_token: refreshToken,
   });
 
-  const res = await fetch(discovery.tokenEndpoint, {
+  const res = await fetchWithTimeout(discovery.tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),

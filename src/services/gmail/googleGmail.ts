@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { getAuthService } from '../auth';
 import {
   GmailAttachmentContent,
@@ -10,7 +11,7 @@ const GMAIL = 'https://gmail.googleapis.com/gmail/v1';
 
 async function gmailFetch(path: string, init: RequestInit = {}) {
   const token = await getAuthService().getValidAccessToken();
-  const res = await fetch(`${GMAIL}${path}`, {
+  const res = await fetchWithTimeout(`${GMAIL}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -120,40 +121,22 @@ export function createGoogleGmailService(): GmailService {
       return page.attachments;
     },
 
-    async getAttachment(messageId, attachmentId) {
-      const detailRes = await gmailFetch(
-        `/users/me/messages/${messageId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
-      );
-      const detail = (await detailRes.json()) as {
-        id: string;
-        snippet?: string;
-        internalDate?: string;
-        payload?: { headers?: Array<{ name: string; value: string }> };
-      };
-
+    async getAttachment(messageId, attachmentId, knownMeta) {
+      // Reuse scan-pipeline metadata — do not re-fetch format=full for every classify.
       const attRes = await gmailFetch(`/users/me/messages/${messageId}/attachments/${attachmentId}`);
       const att = (await attRes.json()) as { data: string; size?: number };
       const dataBase64 = att.data.replace(/-/g, '+').replace(/_/g, '/');
 
-      const subject = headerValue(detail.payload?.headers, 'Subject');
-      const from = headerValue(detail.payload?.headers, 'From');
-      const date = detail.internalDate
-        ? new Date(Number(detail.internalDate)).toISOString()
-        : new Date().toISOString();
-
-      const full = await loadMessageAttachments(messageId);
-      const known = full.find((a) => a.attachmentId === attachmentId);
-
       return {
         messageId,
         attachmentId,
-        filename: known?.filename || 'attachment',
-        mimeType: known?.mimeType || 'application/octet-stream',
-        size: att.size || known?.size || 0,
-        subject,
-        from,
-        date,
-        snippet: detail.snippet || '',
+        filename: knownMeta?.filename || 'attachment',
+        mimeType: knownMeta?.mimeType || 'application/octet-stream',
+        size: att.size || knownMeta?.size || 0,
+        subject: knownMeta?.subject || '',
+        from: knownMeta?.from || '',
+        date: knownMeta?.date || new Date().toISOString(),
+        snippet: knownMeta?.snippet || '',
         dataBase64,
       } satisfies GmailAttachmentContent;
     },

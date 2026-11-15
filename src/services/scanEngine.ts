@@ -1,5 +1,6 @@
 import { classifyWithRules } from '../lib/categorisation';
 import { hashBytes } from '../lib/hash';
+import { appendScanEvent } from '../lib/scanPersistSlim';
 import {
   applyClassificationResult,
   applyTriageBatch,
@@ -28,12 +29,17 @@ import { useMocks } from './config';
 
 export type ScanEngineListener = (state: ScanJobState) => void;
 
+const PERSIST_EVERY_STEPS = 5;
+const PERSIST_EVERY_MS = 15_000;
+
 export class ScanEngine {
   private state: ScanJobState | null = null;
   private running = false;
   private listeners = new Set<ScanEngineListener>();
   private stopRequested: 'pause' | 'cancel' | null = null;
   private vaultDocuments: VaultIndex['documents'] = [];
+  private stepsSincePersist = 0;
+  private lastPersistAt = 0;
 
   subscribe(listener: ScanEngineListener): () => void {
     this.listeners.add(listener);
@@ -45,9 +51,39 @@ export class ScanEngine {
     return this.state;
   }
 
+  isRunning(): boolean {
+    return this.running;
+  }
+
   private emit(state: ScanJobState) {
     this.state = state;
     this.listeners.forEach((l) => l(state));
+  }
+
+  private note(message: string, api?: { label: string; status: string }) {
+    if (!this.state) return;
+    let next = appendScanEvent(this.state, message);
+    next = {
+      ...next,
+      lastStepAt: new Date().toISOString(),
+      lastApiCall: api
+        ? { at: new Date().toISOString(), label: api.label, status: api.status }
+        : next.lastApiCall ?? null,
+    };
+    this.emit(next);
+  }
+
+  private async persist(force = false): Promise<void> {
+    if (!this.state) return;
+    this.stepsSincePersist += 1;
+    const due =
+      force ||
+      this.stepsSincePersist >= PERSIST_EVERY_STEPS ||
+      Date.now() - this.lastPersistAt >= PERSIST_EVERY_MS;
+    if (!due) return;
+    this.stepsSincePersist = 0;
+    this.lastPersistAt = Date.now();
+    await saveScanJobState(this.state);
   }
 
   async hydrate(): Promise<ScanJobState | null> {
@@ -76,8 +112,10 @@ export class ScanEngine {
     });
     job.stage = 'search';
     this.stopRequested = null;
-    this.emit(job);
-    await saveScanJobState(job);
+    this.stepsSincePersist = 0;
+    this.lastPersistAt = 0;
+    this.emit(appendScanEvent(job, `Scan started (${options.mode})`));
+    await this.persist(true);
     await this.runLoop();
   }
 
@@ -85,12 +123,11 @@ export class ScanEngine {
     this.vaultDocuments = vaultIndex.documents;
     if (!this.state) await this.hydrate();
     if (!this.state) return;
-    // After a quota pause, allow another short burst then pause again in mocks
     if (useMocks()) getAiService().__setMockQuotaFailAfter?.(3);
     const next = resumeScan(this.state);
     this.stopRequested = null;
-    this.emit(next);
-    await saveScanJobState(next);
+    this.emit(appendScanEvent(next, 'Scan resumed'));
+    await this.persist(true);
     await this.runLoop();
   }
 
@@ -98,8 +135,8 @@ export class ScanEngine {
     this.stopRequested = 'pause';
     if (this.state && !this.running) {
       const next = pauseByUser(this.state);
-      this.emit(next);
-      await saveScanJobState(next);
+      this.emit(appendScanEvent(next, 'Paused by user'));
+      await this.persist(true);
     }
   }
 
@@ -107,9 +144,17 @@ export class ScanEngine {
     this.stopRequested = 'cancel';
     if (this.state) {
       const next = cancelScan(this.state);
-      this.emit(next);
-      await saveScanJobState(next);
+      this.emit(appendScanEvent(next, 'Scan cancelled'));
+      await this.persist(true);
     }
+  }
+
+  /** Stop the loop and clear persisted state (overwrite, never delete Drive files). */
+  async reset(): Promise<void> {
+    this.stopRequested = 'cancel';
+    this.running = false;
+    this.state = null;
+    await clearScanJobState();
   }
 
   private async runLoop(): Promise<void> {
@@ -118,13 +163,13 @@ export class ScanEngine {
     try {
       while (this.state && !['completed', 'cancelled', 'paused_quota', 'paused_user'].includes(this.state.stage)) {
         if (this.stopRequested === 'cancel') {
-          this.emit(cancelScan(this.state));
-          await saveScanJobState(this.state!);
+          this.emit(appendScanEvent(cancelScan(this.state), 'Scan cancelled'));
+          await this.persist(true);
           break;
         }
         if (this.stopRequested === 'pause') {
-          this.emit(pauseByUser(this.state));
-          await saveScanJobState(this.state!);
+          this.emit(appendScanEvent(pauseByUser(this.state), 'Paused by user'));
+          await this.persist(true);
           break;
         }
 
@@ -137,8 +182,8 @@ export class ScanEngine {
             await this.stepClassify();
           } else if (this.state.stage === 'dedupe') {
             const next = finalizeDedupeGrouping(this.state);
-            this.emit(next);
-            await saveScanJobState(next);
+            this.emit(appendScanEvent(next, 'Scan completed'));
+            await this.persist(true);
           } else {
             break;
           }
@@ -148,8 +193,8 @@ export class ScanEngine {
               message: err instanceof Error ? err.message : 'Session expired — tap to reconnect Google',
               status: (err as { status?: number }).status ?? 401,
             });
-            this.emit(next);
-            await saveScanJobState(next);
+            this.emit(appendScanEvent(next, `Auth pause: ${next.quotaPause?.reason}`));
+            await this.persist(true);
             break;
           }
           if (isQuotaError(err)) {
@@ -157,34 +202,37 @@ export class ScanEngine {
             const next = pauseForQuota(
               this.state,
               { message: err instanceof Error ? err.message : String(err), status },
-              // Keep paused long enough to inspect / screenshot; user can Resume anytime
               useMocks() ? 30 * 60 * 1000 : 60 * 60 * 1000,
             );
-            this.emit(next);
-            await saveScanJobState(next);
+            this.emit(appendScanEvent(next, `Quota pause: ${next.quotaPause?.reason}`));
+            await this.persist(true);
             break;
           }
+          const msg = err instanceof Error ? err.message : String(err);
+          this.note(`Step error: ${msg}`);
+          await this.persist(true);
           throw err;
         }
 
-        // Persist frequently so resume works across restarts
-        if (this.state) await saveScanJobState(this.state);
+        await this.persist(false);
       }
     } finally {
       this.running = false;
+      // Notify UI that the engine stopped (stuck-running detection)
+      if (this.state) this.emit({ ...this.state });
     }
   }
 
   private async stepSearch(): Promise<void> {
     if (!this.state) return;
     const gmail = getGmailService();
+    this.note('Gmail search page…', { label: 'gmail.search', status: 'pending' });
     const page = await gmail.searchAttachmentsPage({
       query: this.state.gmailQuery,
       maxResults: useMocks() ? 40 : DEFAULT_GMAIL_PAGE_SIZE,
       pageToken: this.state.gmailPageToken,
     });
     let next = ingestSearchPage(this.state, page);
-    // Keep mock UI responsive: after a few pages, finish search and drain queues
     if (useMocks() && next.stats.emailsChecked >= 100) {
       next = {
         ...next,
@@ -193,6 +241,15 @@ export class ScanEngine {
         stage: next.triageQueue.length ? 'triage' : next.classifyQueue.length ? 'classify' : 'dedupe',
       };
     }
+    next = appendScanEvent(
+      next,
+      `Search page ${next.stats.pagesFetched}: +${page.attachments.length} attachments → ${next.stage}`,
+    );
+    next = {
+      ...next,
+      lastStepAt: new Date().toISOString(),
+      lastApiCall: { at: new Date().toISOString(), label: 'gmail.search', status: '200' },
+    };
     this.emit(next);
   }
 
@@ -200,15 +257,15 @@ export class ScanEngine {
     if (!this.state) return;
     const batch = takeTriageBatch(this.state, useMocks() ? 6 : DEFAULT_TRIAGE_BATCH_SIZE);
     if (!batch.length) {
-      // Nothing to triage — advance stage
       const next = {
         ...this.state,
-        stage: !this.state.gmailSearchDone
-          ? ('search' as const)
-          : this.state.classifyQueue.length
-            ? ('classify' as const)
+        stage: this.state.classifyQueue.length
+          ? ('classify' as const)
+          : !this.state.gmailSearchDone
+            ? ('search' as const)
             : ('dedupe' as const),
         updatedAt: new Date().toISOString(),
+        lastStepAt: new Date().toISOString(),
       };
       this.emit(next);
       return;
@@ -229,20 +286,23 @@ export class ScanEngine {
 
     let decisions;
     let warning: string | null = null;
+    this.note(`AI triage batch (${batch.length})…`, { label: 'ai.triage', status: 'pending' });
     try {
       decisions = await ai.triageBatch(triageInput);
+      this.note(`AI triage ok (${batch.length})`, { label: 'ai.triage', status: '200' });
     } catch (err) {
       if (isQuotaError(err) || isAuthError(err)) throw err;
-      // Non-fatal (e.g. model 404) — fall back to rule triage so the scan can finish
       decisions = ruleTriage(triageInput);
       warning =
         err instanceof Error
           ? `AI triage unavailable (${err.message}); using rule triage`
           : 'AI triage unavailable; using rule triage';
+      this.note(warning, { label: 'ai.triage', status: 'fallback' });
     }
     const next = {
       ...applyTriageBatch(this.state, decisions),
       lastWarning: warning ?? this.state.lastWarning ?? null,
+      lastStepAt: new Date().toISOString(),
     };
     this.emit(next);
   }
@@ -259,18 +319,33 @@ export class ScanEngine {
             ? 'search'
             : 'dedupe',
         updatedAt: new Date().toISOString(),
+        lastStepAt: new Date().toISOString(),
       });
       return;
     }
 
     const item = this.state.items[itemId];
+    if (!item?.attachment) {
+      this.emit({
+        ...this.state,
+        classifyQueue: this.state.classifyQueue.filter((id) => id !== itemId),
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     const gmail = getGmailService();
     const ai = getAiService();
     let contentHash: string | undefined;
     let classification;
 
     try {
-      const content = await gmail.getAttachment(item.attachment.messageId, item.attachment.attachmentId);
+      this.note(`Classify ${item.attachment.filename}`, { label: 'gmail.attachment', status: 'pending' });
+      const content = await gmail.getAttachment(
+        item.attachment.messageId,
+        item.attachment.attachmentId,
+        item.attachment,
+      );
       contentHash = await hashBytes(content.dataBase64);
       const hasKey = await ai.hasApiKey();
       classification = hasKey
@@ -289,8 +364,9 @@ export class ScanEngine {
             mimeType: item.attachment.mimeType,
             snippet: item.attachment.snippet,
           });
+      this.note(`Classified ${item.attachment.filename}`, { label: 'ai.classify', status: '200' });
     } catch (err) {
-      if (isQuotaError(err)) throw err;
+      if (isQuotaError(err) || isAuthError(err)) throw err;
       classification = classifyWithRules({
         subject: item.attachment.subject,
         from: item.attachment.from,
@@ -298,6 +374,10 @@ export class ScanEngine {
         mimeType: item.attachment.mimeType,
         snippet: item.attachment.snippet,
       });
+      this.note(
+        `Classify fallback for ${item.attachment.filename}: ${err instanceof Error ? err.message : String(err)}`,
+        { label: 'ai.classify', status: 'fallback' },
+      );
     }
 
     const next = applyClassificationResult(
@@ -307,7 +387,7 @@ export class ScanEngine {
       contentHash,
       this.vaultDocuments,
     );
-    this.emit(next);
+    this.emit({ ...next, lastStepAt: new Date().toISOString() });
   }
 }
 

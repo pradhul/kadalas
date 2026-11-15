@@ -1,6 +1,8 @@
-import { classifyWithRules, mergeClassification, shouldConsiderAttachment } from '../../lib/categorisation';
+import { classifyWithRules, mergeClassification } from '../../lib/categorisation';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { normalizeCategory } from '../../lib/folders';
 import { isNewerVersion, scoreDocumentMatch } from '../../lib/matching';
+import { ruleTriage } from '../../lib/ruleTriage';
 import { ClassificationResult } from '../../types/document';
 import {
   AiFileInput,
@@ -10,6 +12,8 @@ import {
   VersionConfirmInput,
   VersionConfirmResult,
 } from './types';
+
+export { ruleTriage } from '../../lib/ruleTriage';
 
 /** Default Gemini model (verified against Google AI Studio docs). */
 export const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
@@ -63,7 +67,7 @@ async function geminiFetch(
   body: Record<string, unknown>,
   model: string = GEMINI_DEFAULT_MODEL,
 ): Promise<Response> {
-  const res = await fetch(geminiUrl(model, key), {
+  const res = await fetchWithTimeout(geminiUrl(model, key), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -74,7 +78,7 @@ async function geminiFetch(
     await throwGeminiHttpError(res);
   } catch (err) {
     if (model !== GEMINI_FALLBACK_MODEL && isModelNotFound(err)) {
-      const retry = await fetch(geminiUrl(GEMINI_FALLBACK_MODEL, key), {
+      const retry = await fetchWithTimeout(geminiUrl(GEMINI_FALLBACK_MODEL, key), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -297,24 +301,3 @@ function str(value: unknown): string | undefined {
   return s || undefined;
 }
 
-/** Rule-based triage used when AI is unavailable or triage fails non-fatally. */
-export function ruleTriage(items: TriageItemInput[]): TriageItemResult[] {
-  return items.map((item) => {
-    const att = item.attachment;
-    const keep = shouldConsiderAttachment({
-      subject: att.subject,
-      from: att.from,
-      fileName: att.filename,
-      mimeType: att.mimeType,
-      snippet: att.snippet,
-    });
-    const hay = `${att.subject} ${att.filename} ${att.snippet}`;
-    const strong = /policy|statement|invoice|tax|passport|warranty|insurance|w-?2|renewal/i.test(hay);
-    return {
-      id: item.id,
-      isLikelyImportant: keep && strong,
-      confidence: keep && strong ? 0.7 : 0.25,
-      reason: keep && strong ? 'Rule triage: document signals' : 'Rule triage: weak/junk signals',
-    };
-  });
-}

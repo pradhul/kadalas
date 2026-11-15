@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-11-15
+
+### Fixed
+
+- Full-mailbox scan now **interleaves** triage/classify after each Gmail page (docs appear before the whole mailbox is listed)
+- Progress is stage-weighted (search 0–60 / triage 60–80 / classify 80–100), never shrinks, shows “about N”
+- `getAttachment` reuses scan metadata (no per-classify `format=full` refetch)
+- Scan persistence: throttle (every 5 steps / 15s), slim state, localStorage try/catch + memory fallback; **never trash/delete** Drive files — clear overwrites `scan-state.json` with `null`
+- Stalled scans (active stage, engine not running) show Resume and auto-resume when the Scan tab opens
+- Silent GIS renew times out at 10s → reconnect; all fetches time out at 30s
+- Broader rule-triage keywords; AI-missing triage ids fall back to rules (not auto-skip)
+
+### Added
+
+- Scan debug card (stage, engine running, pages, triage/classify counts, last API, token expiry) + capped event log with Copy log + Reset scan
+
+### Changed
+
+- Version bump to **0.1.4**
+
 ## [0.1.3] - 2026-11-15
 
 ### Fixed
@@ -81,6 +101,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.4]: https://github.com/pradhul/kadalas/releases/tag/v0.1.4
 [0.1.3]: https://github.com/pradhul/kadalas/releases/tag/v0.1.3
 [0.1.2]: https://github.com/pradhul/kadalas/releases/tag/v0.1.2
 [0.1.1]: https://github.com/pradhul/kadalas/releases/tag/v0.1.1

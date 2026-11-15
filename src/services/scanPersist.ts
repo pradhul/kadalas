@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { ScanJobState } from '../types/scan';
+import { slimScanStateForPersist } from '../lib/scanPersistSlim';
 import { getDriveService } from './drive';
 
 const LOCAL_KEY = 'dv_scan_job_state_v1';
@@ -7,9 +8,9 @@ let memoryFallback: ScanJobState | null = null;
 
 async function localGet(): Promise<ScanJobState | null> {
   if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
-    const raw = localStorage.getItem(LOCAL_KEY);
-    if (!raw) return memoryFallback;
     try {
+      const raw = localStorage.getItem(LOCAL_KEY);
+      if (!raw) return memoryFallback;
       return JSON.parse(raw) as ScanJobState;
     } catch {
       return memoryFallback;
@@ -21,17 +22,22 @@ async function localGet(): Promise<ScanJobState | null> {
 async function localSet(state: ScanJobState | null): Promise<void> {
   memoryFallback = state;
   if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
-    if (!state) localStorage.removeItem(LOCAL_KEY);
-    else localStorage.setItem(LOCAL_KEY, JSON.stringify(state));
+    try {
+      if (!state) localStorage.removeItem(LOCAL_KEY);
+      else localStorage.setItem(LOCAL_KEY, JSON.stringify(slimScanStateForPersist(state)));
+    } catch {
+      // QuotaExceeded / private mode — keep in-memory fallback only
+    }
   }
 }
 
 export async function saveScanJobState(state: ScanJobState): Promise<void> {
-  await localSet(state);
+  const slim = slimScanStateForPersist(state);
+  await localSet(slim);
   try {
-    await getDriveService().saveScanState(state);
+    await getDriveService().saveScanState(slim);
   } catch {
-    // local cache remains
+    // local / memory cache remains
   }
 }
 
@@ -50,6 +56,7 @@ export async function loadScanJobState(): Promise<ScanJobState | null> {
   }
 }
 
+/** Clear scan job — overwrite Drive file with null JSON; never trash/delete. */
 export async function clearScanJobState(): Promise<void> {
   await localSet(null);
   try {
