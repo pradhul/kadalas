@@ -1,6 +1,13 @@
 {
   "name": "document-vault",
-  "version": "1.0.0",
+  "version": "0.1.0",
+  "description": "Personal document vault (Expo) — Gmail scan, Google Drive storage, BYOK AI",
+  "license": "MIT",
+  "author": "Pradhul",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pradhul/document-vault.git"
+  },
   "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/dm-sans": "^0.4.2",
