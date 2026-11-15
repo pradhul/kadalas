@@ -1,0 +1,259 @@
+import {
+  INDEX_FILENAME,
+  VAULT_CATEGORIES,
+  VAULT_ROOT_FOLDER,
+  VERSIONS_FOLDER,
+  VaultCategory,
+  VaultDocument,
+  VaultIndex,
+} from '../../types/document';
+import { getAuthService } from '../auth';
+import { DriveFileRef, DriveService, UploadInput } from './types';
+
+const DRIVE = 'https://www.googleapis.com/drive/v3';
+const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
+
+async function authHeaders(): Promise<HeadersInit> {
+  const token = await getAuthService().getValidAccessToken();
+  return { Authorization: `Bearer ${token}` };
+}
+
+async function driveFetch(url: string, init: RequestInit = {}) {
+  const headers = { ...(await authHeaders()), ...(init.headers || {}) };
+  const res = await fetch(url, { ...init, headers });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Drive API ${res.status}: ${text}`);
+  }
+  return res;
+}
+
+async function findFolder(name: string, parentId?: string): Promise<string | null> {
+  const q = [
+    `name = '${name.replace(/'/g, "\\'")}'`,
+    `mimeType = 'application/vnd.google-apps.folder'`,
+    'trashed = false',
+    parentId ? `'${parentId}' in parents` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' and ');
+
+  const res = await driveFetch(`${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=5`);
+  const data = (await res.json()) as { files?: Array<{ id: string }> };
+  return data.files?.[0]?.id ?? null;
+}
+
+async function createFolder(name: string, parentId?: string): Promise<string> {
+  const body: Record<string, unknown> = {
+    name,
+    mimeType: 'application/vnd.google-apps.folder',
+  };
+  if (parentId) body.parents = [parentId];
+
+  const res = await driveFetch(`${DRIVE}/files?fields=id,name`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json()) as { id: string };
+  return data.id;
+}
+
+async function ensureFolder(name: string, parentId?: string): Promise<string> {
+  const existing = await findFolder(name, parentId);
+  if (existing) return existing;
+  return createFolder(name, parentId);
+}
+
+export function createGoogleDriveService(): DriveService {
+  let cache: { vaultFolderId: string; folderIdsByPath: Record<string, string>; indexFileId?: string } | null =
+    null;
+
+  async function ensureStructure() {
+    if (cache) return cache;
+    const vaultFolderId = await ensureFolder(VAULT_ROOT_FOLDER);
+    const folderIdsByPath: Record<string, string> = { '': vaultFolderId };
+
+    for (const category of VAULT_CATEGORIES) {
+      const parts = category.split('/');
+      let parentId = vaultFolderId;
+      let path = '';
+      for (const part of parts) {
+        path = path ? `${path}/${part}` : part;
+        if (!folderIdsByPath[path]) {
+          const id = await ensureFolder(part, parentId);
+          folderIdsByPath[path] = id;
+          parentId = id;
+        } else {
+          parentId = folderIdsByPath[path];
+        }
+      }
+    }
+
+    folderIdsByPath[VERSIONS_FOLDER] = await ensureFolder(VERSIONS_FOLDER, vaultFolderId);
+    cache = { vaultFolderId, folderIdsByPath };
+    return cache;
+  }
+
+  async function findIndexFile(vaultFolderId: string): Promise<string | null> {
+    const q = `name = '${INDEX_FILENAME}' and '${vaultFolderId}' in parents and trashed = false`;
+    const res = await driveFetch(`${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`);
+    const data = (await res.json()) as { files?: Array<{ id: string }> };
+    return data.files?.[0]?.id ?? null;
+  }
+
+  return {
+    async ensureVaultStructure() {
+      const s = await ensureStructure();
+      return { vaultFolderId: s.vaultFolderId, folderIdsByPath: s.folderIdsByPath };
+    },
+
+    async loadIndex() {
+      const s = await ensureStructure();
+      const indexFileId = s.indexFileId || (await findIndexFile(s.vaultFolderId));
+      if (!indexFileId) {
+        const empty: VaultIndex = {
+          version: 1,
+          vaultFolderId: s.vaultFolderId,
+          lastScanAt: null,
+          documents: [],
+          updatedAt: new Date().toISOString(),
+        };
+        return empty;
+      }
+      s.indexFileId = indexFileId;
+      const res = await driveFetch(`${DRIVE}/files/${indexFileId}?alt=media`);
+      return (await res.json()) as VaultIndex;
+    },
+
+    async saveIndex(index: VaultIndex) {
+      const s = await ensureStructure();
+      const body = JSON.stringify(index, null, 2);
+      let indexFileId = s.indexFileId || (await findIndexFile(s.vaultFolderId));
+
+      if (!indexFileId) {
+        const metadata = {
+          name: INDEX_FILENAME,
+          parents: [s.vaultFolderId],
+          mimeType: 'application/json',
+        };
+        const form = buildMultipart(metadata, body, 'application/json');
+        const res = await driveFetch(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
+          body: form.body,
+        });
+        const data = (await res.json()) as { id: string };
+        s.indexFileId = data.id;
+        return;
+      }
+
+      const res = await driveFetch(`${UPLOAD}/files/${indexFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      await res.json();
+    },
+
+    async uploadFile(input: UploadInput) {
+      const metadata = {
+        name: input.name,
+        parents: [input.parentFolderId],
+        mimeType: input.mimeType,
+      };
+      const content =
+        input.contentText ??
+        (input.contentBase64 ? atobCompat(input.contentBase64) : '');
+      const form = buildMultipart(metadata, content, input.mimeType);
+      const res = await driveFetch(`${UPLOAD}/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,size`, {
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
+        body: form.body,
+      });
+      return (await res.json()) as DriveFileRef;
+    },
+
+    async moveFile(fileId, newParentId, oldParentId) {
+      let remove = oldParentId;
+      if (!remove) {
+        const meta = await driveFetch(`${DRIVE}/files/${fileId}?fields=parents`);
+        const data = (await meta.json()) as { parents?: string[] };
+        remove = data.parents?.[0];
+      }
+      const params = new URLSearchParams({ addParents: newParentId, fields: 'id,parents' });
+      if (remove) params.set('removeParents', remove);
+      await driveFetch(`${DRIVE}/files/${fileId}?${params.toString()}`, { method: 'PATCH' });
+    },
+
+    async renameFile(fileId, newName) {
+      await driveFetch(`${DRIVE}/files/${fileId}?fields=id,name`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName }),
+      });
+    },
+
+    async getDownloadUrl(fileId) {
+      return `${DRIVE}/files/${fileId}?alt=media`;
+    },
+
+    async getFolderIdForCategory(category: VaultCategory) {
+      const s = await ensureStructure();
+      return s.folderIdsByPath[category] || s.vaultFolderId;
+    },
+
+    async archiveToVersions(fileId, versionsFolderId) {
+      await this.moveFile(fileId, versionsFolderId);
+      const res = await driveFetch(`${DRIVE}/files/${fileId}?fields=id,name,mimeType,webViewLink`);
+      return (await res.json()) as DriveFileRef;
+    },
+
+    async upsertDocument(doc: VaultDocument) {
+      const index = await this.loadIndex();
+      const idx = index.documents.findIndex((d) => d.id === doc.id);
+      if (idx >= 0) index.documents[idx] = doc;
+      else index.documents.push(doc);
+      index.updatedAt = new Date().toISOString();
+      await this.saveIndex(index);
+      return index;
+    },
+  };
+}
+
+function buildMultipart(
+  metadata: Record<string, unknown>,
+  content: string,
+  contentType: string,
+): { boundary: string; body: string } {
+  const boundary = `dv_boundary_${Date.now()}`;
+  const body =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: ${contentType}\r\n\r\n` +
+    `${content}\r\n` +
+    `--${boundary}--`;
+  return { boundary, body };
+}
+
+function atobCompat(b64: string): string {
+  if (typeof globalThis.atob === 'function') return globalThis.atob(b64);
+  // minimal polyfill for environments without atob
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let str = '';
+  let i = 0;
+  const input = b64.replace(/=+$/, '');
+  while (i < input.length) {
+    const enc1 = chars.indexOf(input.charAt(i++));
+    const enc2 = chars.indexOf(input.charAt(i++));
+    const enc3 = chars.indexOf(input.charAt(i++));
+    const enc4 = chars.indexOf(input.charAt(i++));
+    const bitmap = (enc1 << 18) | (enc2 << 12) | (enc3 << 6) | enc4;
+    str += String.fromCharCode((bitmap >> 16) & 255);
+    if (enc3 !== 64) str += String.fromCharCode((bitmap >> 8) & 255);
+    if (enc4 !== 64) str += String.fromCharCode(bitmap & 255);
+  }
+  return str;
+}
