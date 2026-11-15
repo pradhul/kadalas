@@ -4,6 +4,8 @@ import { createMockAuthService } from './mockAuth';
 import { AuthService } from './types';
 
 export * from './types';
+export * from './errors';
+export { subscribeAuthEvents, emitAuthEvent } from './authEvents';
 
 let singleton: AuthService | null = null;
 

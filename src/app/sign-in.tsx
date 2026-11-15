@@ -44,13 +44,14 @@ export default function SignInScreen() {
               Demo mode is on (EXPO_PUBLIC_USE_MOCKS). Sign-in uses a local mock session so you can explore every
               screen without Google credentials.
             </Banner>
-          ) : (
+          ) : null}
+
+          {!mocksOn && typeof __DEV__ !== 'undefined' && __DEV__ ? (
             <Banner>
-              Real Google mode. OAuth redirect uses this site’s origin
-              ({typeof window !== 'undefined' ? window.location.origin : 'window.location.origin'}). Add that URL as an
-              authorized redirect URI in Google Cloud Console.
+              Dev: web auth uses Google Identity Services (token client). Authorized JavaScript origin must include
+              this host ({typeof window !== 'undefined' ? window.location.origin : 'window.location.origin'}).
             </Banner>
-          )}
+          ) : null}
 
           {error ? <Banner tone="warn">{error}</Banner> : null}
 
@@ -86,7 +87,7 @@ export default function SignInScreen() {
 
           <Text style={styles.scopes}>
             Requests gmail.readonly + drive.file. Drive access is limited to files this app creates.
-            {!useMocks()
+            {!mocksOn
               ? ' Use “Try demo data” to explore seeded vault content without connecting Google.'
               : ''}
           </Text>

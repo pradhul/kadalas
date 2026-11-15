@@ -1,6 +1,6 @@
 # Kadalas
 
-**v0.1.1 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
+**v0.1.2 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
 
 There is **no app-owned backend or database**:
 
@@ -75,15 +75,17 @@ This runs `expo export --platform web` and writes a static site to **`dist/`**, 
 
 Serve `dist/` from any static host. On a phone, the layout is responsive (narrow padding, wrapping Settings actions, full-width sign-in).
 
-### Google OAuth redirect (any deploy origin)
+### Google sign-in on web (no client secret)
 
-On web, the OAuth redirect URI is always **`window.location.origin`** (no hardcoded host). For every place you deploy (preview, production, custom domain):
+Web builds use **Google Identity Services** (`https://accounts.google.com/gsi/client`) with the **token client** (`google.accounts.oauth2.initTokenClient`). That is a popup / token flow — **no `client_secret`**, which a static Netlify (or other) host cannot store safely.
+
+There is **no refresh token** on web; access tokens last ~1 hour. The app stores `expiresAt`, silently requests a new token when needed (`prompt: ''`), and if Google requires interaction it shows **Session expired — tap to reconnect Google**. A long mailbox scan pauses cleanly (same persistence as AI quota pause) and resumes after reconnect.
+
+For every deploy host:
 
 1. Google Cloud Console → Credentials → your **Web** OAuth client
-2. **Authorized JavaScript origins** → add `https://your-deployed-host`
-3. **Authorized redirect URIs** → add the same origin (`https://your-deployed-host`)
-
-Local web: add `http://localhost:43123` (or whatever port you use).
+2. **Authorized JavaScript origins** → add `https://your-deployed-host` (and local `http://localhost:43123`)
+3. Redirect URIs are not used by the GIS token client; native iOS/Android will still use authorization-code + PKCE with the `kadalas://` scheme when those clients ship
 
 When the build is in real mode (`EXPO_PUBLIC_USE_MOCKS=false`), the sign-in screen also offers **Try demo data** so you can explore the seeded vault without connecting Google.
 

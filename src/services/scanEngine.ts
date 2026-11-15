@@ -13,6 +13,7 @@ import {
   ingestSearchPage,
   isQuotaError,
   pauseByUser,
+  pauseForAuth,
   pauseForQuota,
   resumeScan,
   takeTriageBatch,
@@ -20,6 +21,7 @@ import {
 import { ScanMode, ScanJobState } from '../types/scan';
 import { ScanCandidate, VaultIndex } from '../types/document';
 import { getAiService } from './ai';
+import { isAuthError } from './auth/errors';
 import { getGmailService } from './gmail';
 import { clearScanJobState, loadScanJobState, saveScanJobState } from './scanPersist';
 import { useMocks } from './config';
@@ -141,6 +143,15 @@ export class ScanEngine {
             break;
           }
         } catch (err) {
+          if (isAuthError(err)) {
+            const next = pauseForAuth(this.state, {
+              message: err instanceof Error ? err.message : 'Session expired — tap to reconnect Google',
+              status: (err as { status?: number }).status ?? 401,
+            });
+            this.emit(next);
+            await saveScanJobState(next);
+            break;
+          }
           if (isQuotaError(err)) {
             const status = (err as { status?: number }).status;
             const next = pauseForQuota(

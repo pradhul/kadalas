@@ -4,8 +4,9 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Banner, Button, Field, Screen, SectionTitle } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
+import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
-import { estimateRemaining, getActiveStageLabel } from '../../lib/scanPipeline';
+import { estimateRemaining, getActiveStageLabel, isAuthPause } from '../../lib/scanPipeline';
 import { useMocks } from '../../services/config';
 
 export default function ScanScreen() {
@@ -18,6 +19,7 @@ export default function ScanScreen() {
     pauseMailboxScan,
     cancelMailboxScan,
   } = useVault();
+  const { reconnectGoogle, loading: authLoading, needsReconnect } = useAuth();
   const [lookback, setLookback] = useState('90');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -28,6 +30,7 @@ export default function ScanScreen() {
     !['idle', 'completed', 'cancelled'].includes(scanJob.stage) &&
     scanJob.stage !== undefined;
   const pausedQuota = scanJob?.stage === 'paused_quota';
+  const pausedAuth = isAuthPause(scanJob) || (pausedQuota && needsReconnect);
   const pausedUser = scanJob?.stage === 'paused_user';
   const running =
     active && !pausedQuota && !pausedUser && scanJob!.stage !== 'completed';
@@ -70,8 +73,14 @@ export default function ScanScreen() {
               style={[styles.progress, pausedQuota && styles.progressPaused]}
               testID="scan-progress-panel"
             >
-              <Text style={styles.progressTitle}>{getActiveStageLabel(scanJob.stage)}</Text>
-              {pausedQuota ? (
+              <Text style={styles.progressTitle}>
+                {getActiveStageLabel(scanJob.stage, { authPause: pausedAuth })}
+              </Text>
+              {pausedAuth ? (
+                <Banner tone="warn">
+                  Session expired — tap to reconnect Google, then Resume to continue the scan where it left off.
+                </Banner>
+              ) : pausedQuota ? (
                 <Banner tone="warn">
                   AI quota / rate limit hit. Resumes {new Date(scanJob.quotaPause!.resumeAfter).toLocaleString()}{' '}
                   automatically, or tap Resume.
@@ -99,7 +108,22 @@ export default function ScanScreen() {
                 {running ? (
                   <Button title="Pause" variant="secondary" onPress={() => void pauseMailboxScan()} />
                 ) : null}
-                {pausedQuota || pausedUser ? (
+                {pausedAuth ? (
+                  <Button
+                    title="Reconnect Google"
+                    loading={authLoading}
+                    onPress={async () => {
+                      setError(null);
+                      try {
+                        await reconnectGoogle();
+                        await resumeMailboxScan();
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'Could not reconnect');
+                      }
+                    }}
+                  />
+                ) : null}
+                {(pausedQuota && !pausedAuth) || pausedUser ? (
                   <Button title="Resume" onPress={() => void resumeMailboxScan()} />
                 ) : null}
                 {active && scanJob.stage !== 'completed' ? (

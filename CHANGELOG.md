@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-11-15
+
+### Fixed
+
+- **Web Google sign-in** no longer uses authorization-code + PKCE against a Web client (Google required `client_secret`). Web now uses **Google Identity Services** token client (`google.accounts.oauth2.initTokenClient`) — popup, no secret, works on mobile browsers
+- Friendly sign-in errors instead of raw Google OAuth text (e.g. “client_secret is missing”)
+- Production UI no longer shows the OAuth developer hint (kept under `__DEV__` only)
+
+### Added
+
+- Web access-token expiry handling (~1h, no refresh token): silent GIS re-request (`prompt: ''`); if interaction is required, **Session expired — tap to reconnect Google** banner + scan pause (reuses quota-pause persistence) with Resume after reconnect
+- Native Android/iOS path still uses authorization-code + PKCE for future clients
+
+### Changed
+
+- Version bump to **0.1.2**; README documents web GIS auth vs native PKCE
+
 ## [0.1.1] - 2026-11-15
 
 ### Added
@@ -48,5 +65,6 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.2]: https://github.com/pradhul/kadalas/releases/tag/v0.1.2
 [0.1.1]: https://github.com/pradhul/kadalas/releases/tag/v0.1.1
 [0.1.0]: https://github.com/pradhul/kadalas/releases/tag/v0.1.0

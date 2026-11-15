@@ -96,9 +96,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Auto-resume after quota pause when resumeAfter has passed and app is open
+  // Auto-resume after quota pause when resumeAfter has passed and app is open.
+  // Skip auth (401) pauses — those need an interactive Google reconnect first.
   useEffect(() => {
     if (!scanJob || scanJob.stage !== 'paused_quota' || !scanJob.quotaPause || !index) return;
+    if (scanJob.quotaPause.httpStatus === 401) return;
     const resumeAt = new Date(scanJob.quotaPause.resumeAfter).getTime();
     const delay = Math.max(0, resumeAt - Date.now());
     const t = setTimeout(() => {

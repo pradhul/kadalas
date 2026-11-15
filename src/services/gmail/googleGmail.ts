@@ -19,7 +19,9 @@ async function gmailFetch(path: string, init: RequestInit = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Gmail API ${res.status}: ${text}`);
+    const err = new Error(`Gmail API ${res.status}: ${text}`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
   return res;
 }

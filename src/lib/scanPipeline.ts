@@ -347,6 +347,31 @@ export function pauseForQuota(
   };
 }
 
+/**
+ * Pause when Google access token expires (web GIS has no refresh_token).
+ * Reuses paused_quota persistence so Resume works after reconnect.
+ * Long resumeAfter so we do not auto-resume before the user reconnects.
+ */
+export function pauseForAuth(
+  state: ScanJobState,
+  err: { message?: string; status?: number } = {},
+  now: Date = new Date(),
+): ScanJobState {
+  return pauseForQuota(
+    state,
+    {
+      message: err.message || 'Session expired — tap to reconnect Google',
+      status: err.status ?? 401,
+    },
+    30 * 24 * 60 * 60 * 1000,
+    now,
+  );
+}
+
+export function isAuthPause(state: ScanJobState | null | undefined): boolean {
+  return state?.stage === 'paused_quota' && state.quotaPause?.httpStatus === 401;
+}
+
 export function pauseByUser(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
   return {
     ...state,
@@ -381,6 +406,7 @@ export function isQuotaError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as { status?: number; statusCode?: number; message?: string };
   const status = e.status ?? e.statusCode;
+  if (status === 401) return false; // auth — handled separately
   if (status === 429) return true;
   const msg = (e.message || '').toLowerCase();
   return (
@@ -411,7 +437,7 @@ export function estimateRemaining(state: ScanJobState): {
   };
 }
 
-export function getActiveStageLabel(stage: ScanStage): string {
+export function getActiveStageLabel(stage: ScanStage, opts?: { authPause?: boolean }): string {
   switch (stage) {
     case 'search':
       return 'Searching Gmail (no AI)';
@@ -424,7 +450,9 @@ export function getActiveStageLabel(stage: ScanStage): string {
     case 'dedupe':
       return 'Grouping & dedupe';
     case 'paused_quota':
-      return 'Paused — AI quota / rate limit';
+      return opts?.authPause
+        ? 'Paused — Google session expired'
+        : 'Paused — AI quota / rate limit';
     case 'paused_user':
       return 'Paused by you';
     case 'completed':

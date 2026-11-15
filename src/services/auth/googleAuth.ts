@@ -3,6 +3,9 @@ import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import { getGoogleOAuthConfig, getOAuthRedirectUri, GOOGLE_SCOPES } from '../config';
 import { clearAuthTokens, getAuthTokens, saveAuthTokens, StoredTokens } from '../secureStorage';
+import { emitAuthEvent } from './authEvents';
+import { AuthExpiredError, friendlyAuthError } from './errors';
+import { requestGisAccessToken, revokeGisToken } from './gisTokenClient';
 import { AuthService, AuthSession } from './types';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -47,7 +50,7 @@ async function fetchUserInfo(accessToken: string): Promise<{ email: string; name
   };
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<StoredTokens> {
+async function refreshAccessTokenNative(refreshToken: string): Promise<StoredTokens> {
   const clientId = pickClientId();
   if (!clientId) throw new Error('Missing Google OAuth client ID');
 
@@ -87,6 +90,170 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens> {
   return next;
 }
 
+async function persistAccessToken(
+  accessToken: string,
+  expiresIn: number,
+  extras?: Partial<StoredTokens>,
+): Promise<StoredTokens> {
+  const existing = await getAuthTokens();
+  let email = extras?.email ?? existing?.email;
+  let name = extras?.name ?? existing?.name;
+  let picture = extras?.picture ?? existing?.picture;
+
+  if (!email || !name) {
+    const profile = await fetchUserInfo(accessToken);
+    email = profile.email;
+    name = profile.name;
+    picture = profile.picture;
+  }
+
+  const stored: StoredTokens = {
+    accessToken,
+    // Web GIS token flow has no refresh_token
+    refreshToken: Platform.OS === 'web' ? undefined : extras?.refreshToken ?? existing?.refreshToken,
+    expiresAt: Date.now() + expiresIn * 1000,
+    idToken: extras?.idToken ?? existing?.idToken,
+    email,
+    name,
+    picture,
+  };
+  await saveAuthTokens(stored);
+  emitAuthEvent('restored');
+  return stored;
+}
+
+/** Web: Google Identity Services token client (no client_secret). */
+async function signInWeb(): Promise<AuthSession> {
+  const clientId = pickClientId();
+  if (!clientId) {
+    throw new Error('Google OAuth client ID is not configured. Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.');
+  }
+
+  try {
+    const { accessToken, expiresIn } = await requestGisAccessToken({
+      clientId,
+      interactive: true,
+    });
+    const profile = await fetchUserInfo(accessToken);
+    const stored = await persistAccessToken(accessToken, expiresIn, profile);
+    return toSession(stored);
+  } catch (e) {
+    throw new Error(friendlyAuthError(e));
+  }
+}
+
+/** Native: authorization code + PKCE (for future Android/iOS clients). */
+async function signInNative(): Promise<AuthSession> {
+  const clientId = pickClientId();
+  if (!clientId) {
+    throw new Error(
+      'Google OAuth client ID is not configured. Set EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID / ANDROID_CLIENT_ID or enable mocks.',
+    );
+  }
+
+  const redirectUri = getOAuthRedirectUri('kadalas');
+
+  const request = new ExpoAuthSession.AuthRequest({
+    clientId,
+    redirectUri,
+    scopes: [...GOOGLE_SCOPES],
+    responseType: ExpoAuthSession.ResponseType.Code,
+    usePKCE: true,
+    extraParams: {
+      access_type: 'offline',
+      prompt: 'consent',
+    },
+  });
+
+  await request.makeAuthUrlAsync(discovery);
+  const result = await request.promptAsync(discovery);
+
+  if (result.type !== 'success' || !result.params.code) {
+    throw new Error(result.type === 'dismiss' ? 'Sign-in was cancelled.' : 'Google sign-in failed. Please try again.');
+  }
+
+  const tokenResult = await ExpoAuthSession.exchangeCodeAsync(
+    {
+      clientId,
+      code: result.params.code,
+      redirectUri,
+      extraParams: {
+        code_verifier: request.codeVerifier || '',
+      },
+    },
+    discovery,
+  );
+
+  const accessToken = tokenResult.accessToken;
+  if (!accessToken) throw new Error('Google sign-in failed. Please try again.');
+
+  const profile = await fetchUserInfo(accessToken);
+  const stored: StoredTokens = {
+    accessToken,
+    refreshToken: tokenResult.refreshToken,
+    expiresAt: tokenResult.expiresIn ? Date.now() + tokenResult.expiresIn * 1000 : undefined,
+    idToken: tokenResult.idToken,
+    email: profile.email,
+    name: profile.name,
+    picture: profile.picture,
+  };
+  await saveAuthTokens(stored);
+  emitAuthEvent('restored');
+  return toSession(stored);
+}
+
+async function getValidAccessTokenWeb(): Promise<string> {
+  const tokens = await getAuthTokens();
+  if (!tokens?.accessToken) {
+    emitAuthEvent('expired');
+    throw new AuthExpiredError();
+  }
+
+  const stillValid = tokens.expiresAt && tokens.expiresAt > Date.now() + 60_000;
+  if (stillValid) return tokens.accessToken;
+
+  const clientId = pickClientId();
+  if (!clientId) {
+    emitAuthEvent('expired');
+    throw new AuthExpiredError();
+  }
+
+  try {
+    const { accessToken, expiresIn } = await requestGisAccessToken({
+      clientId,
+      interactive: false,
+    });
+    await persistAccessToken(accessToken, expiresIn);
+    return accessToken;
+  } catch (e) {
+    emitAuthEvent('expired');
+    if (e instanceof AuthExpiredError) throw e;
+    throw new AuthExpiredError(friendlyAuthError(e));
+  }
+}
+
+async function getValidAccessTokenNative(): Promise<string> {
+  const tokens = await getAuthTokens();
+  if (!tokens?.accessToken) throw new AuthExpiredError('Not signed in');
+
+  const needsRefresh = !tokens.expiresAt || tokens.expiresAt < Date.now() + 60_000;
+  if (needsRefresh) {
+    if (!tokens.refreshToken) {
+      emitAuthEvent('expired');
+      throw new AuthExpiredError();
+    }
+    try {
+      const refreshed = await refreshAccessTokenNative(tokens.refreshToken);
+      emitAuthEvent('restored');
+      return refreshed.accessToken;
+    } catch {
+      emitAuthEvent('expired');
+      throw new AuthExpiredError();
+    }
+  }
+  return tokens.accessToken;
+}
+
 export function createGoogleAuthService(): AuthService {
   return {
     async getSession() {
@@ -96,71 +263,21 @@ export function createGoogleAuthService(): AuthService {
     },
 
     async signIn() {
-      const clientId = pickClientId();
-      if (!clientId) {
-        throw new Error(
-          'Google OAuth client ID is not configured. Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (and iOS/Android IDs) or enable mocks.',
-        );
-      }
-
-      // Web: window.location.origin (any deploy host). Native: kadalas:// scheme.
-      const redirectUri = getOAuthRedirectUri('kadalas');
-
-      const request = new ExpoAuthSession.AuthRequest({
-        clientId,
-        redirectUri,
-        scopes: [...GOOGLE_SCOPES],
-        responseType: ExpoAuthSession.ResponseType.Code,
-        usePKCE: true,
-        extraParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
-      });
-
-      await request.makeAuthUrlAsync(discovery);
-      const result = await request.promptAsync(discovery);
-
-      if (result.type !== 'success' || !result.params.code) {
-        throw new Error(result.type === 'dismiss' ? 'Sign-in cancelled' : 'Google sign-in failed');
-      }
-
-      const tokenResult = await ExpoAuthSession.exchangeCodeAsync(
-        {
-          clientId,
-          code: result.params.code,
-          redirectUri,
-          extraParams: {
-            code_verifier: request.codeVerifier || '',
-          },
-        },
-        discovery,
-      );
-
-      const accessToken = tokenResult.accessToken;
-      if (!accessToken) throw new Error('No access token returned');
-
-      const profile = await fetchUserInfo(accessToken);
-      const stored: StoredTokens = {
-        accessToken,
-        refreshToken: tokenResult.refreshToken,
-        expiresAt: tokenResult.expiresIn ? Date.now() + tokenResult.expiresIn * 1000 : undefined,
-        idToken: tokenResult.idToken,
-        email: profile.email,
-        name: profile.name,
-        picture: profile.picture,
-      };
-      await saveAuthTokens(stored);
-      return toSession(stored);
+      if (Platform.OS === 'web') return signInWeb();
+      return signInNative();
     },
 
     async signOut() {
       const tokens = await getAuthTokens();
       if (tokens?.accessToken) {
         try {
-          await fetch(`${discovery.revocationEndpoint}?token=${encodeURIComponent(tokens.accessToken)}`, {
-            method: 'POST',
-          });
+          if (Platform.OS === 'web') {
+            await revokeGisToken(tokens.accessToken);
+          } else {
+            await fetch(`${discovery.revocationEndpoint}?token=${encodeURIComponent(tokens.accessToken)}`, {
+              method: 'POST',
+            });
+          }
         } catch {
           // best-effort revoke
         }
@@ -169,16 +286,8 @@ export function createGoogleAuthService(): AuthService {
     },
 
     async getValidAccessToken() {
-      const tokens = await getAuthTokens();
-      if (!tokens?.accessToken) throw new Error('Not signed in');
-
-      const needsRefresh = !tokens.expiresAt || tokens.expiresAt < Date.now() + 60_000;
-      if (needsRefresh) {
-        if (!tokens.refreshToken) throw new Error('Session expired — please sign in again');
-        const refreshed = await refreshAccessToken(tokens.refreshToken);
-        return refreshed.accessToken;
-      }
-      return tokens.accessToken;
+      if (Platform.OS === 'web') return getValidAccessTokenWeb();
+      return getValidAccessTokenNative();
     },
   };
 }

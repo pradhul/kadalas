@@ -25,7 +25,9 @@ async function driveFetch(url: string, init: RequestInit = {}) {
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Drive API ${res.status}: ${text}`);
+    const err = new Error(`Drive API ${res.status}: ${text}`) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
   return res;
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
+import { SessionBanner } from '../../components/SessionBanner';
 import { colors, typography } from '../../constants/theme';
 
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
@@ -13,7 +14,9 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 
 export default function TabsLayout() {
   return (
-    <Tabs
+    <View style={{ flex: 1 }}>
+      <SessionBanner />
+      <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.teal,
@@ -57,5 +60,6 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    </View>
   );
 }
