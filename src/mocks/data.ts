@@ -332,7 +332,58 @@ export const MOCK_VAULT_INDEX: VaultIndex = {
   ],
 };
 
+/** Four annual comprehensive policies for one reg — review shows "4 versions found, keeping 2026-27 policy". */
+function mockCompYear(
+  year: number,
+  insurer: string,
+  policy: string,
+): ScanCandidate {
+  const start = `${year}-05-06`;
+  const end = `${year + 1}-05-05`;
+  const id = `scan_dl01_${year}`;
+  return {
+    id,
+    gmailMessageId: `msg_${id}`,
+    gmailAttachmentId: `att_${id}`,
+    subject: `${insurer} Package Policy ${year} — DL-01-CD-4321`,
+    from: `${insurer} <motor@example.com>`,
+    date: new Date(Date.UTC(year, 4, 6)).toISOString(),
+    fileName: `${insurer.toLowerCase().replace(/\s+/g, '')}-package-dl01cd4321-${year}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 200_000 + year,
+    previewSnippet: `Package Policy comprehensive vehicle insurance registration DL-01-CD-4321`,
+    contentRef: `fnv1a-dl01-${year}`,
+    status: 'pending',
+    classification: {
+      category: 'Insurance/Vehicle',
+      title: `${insurer} Package · DL-01-CD-4321`,
+      metadata: {
+        issuer: insurer,
+        documentType: 'Package / comprehensive policy',
+        referenceNumber: policy,
+        holderName: 'Pradhul Dev',
+        registrationNumber: 'DL-01-CD-4321',
+        issueDate: start,
+        expiryDate: end,
+        policyStartDate: start,
+        coverageType: 'comprehensive',
+        coverageSlots: 'own_damage,third_party',
+        subjectKey: 'vehicle:reg:DL01CD4321',
+        subjectLabel: 'DL-01-CD-4321',
+      },
+      confidence: 0.94,
+      isImportantDocument: true,
+    },
+  };
+}
+
 export const MOCK_SCAN_CANDIDATES: ScanCandidate[] = [
+  // Entity grouping demo: 4 versions, insurer switch in the middle (ICICI → HDFC → Bajaj → Bajaj)
+  mockCompYear(2023, 'ICICI Lombard', 'ICICI-DL-2023'),
+  mockCompYear(2024, 'HDFC Ergo', 'HDFC-DL-2024'),
+  mockCompYear(2025, 'Bajaj Allianz', 'BAJ-DL-2025'),
+  mockCompYear(2026, 'Bajaj Allianz', 'BAJ-DL-2026'),
+  // Split OD + TP (same subject, two current slots)
   {
     id: 'scan_ka01_od',
     gmailMessageId: 'msg_scan_od',
@@ -399,37 +450,37 @@ export const MOCK_SCAN_CANDIDATES: ScanCandidate[] = [
       isImportantDocument: true,
     },
   },
+  // Ambiguous — make/model + holder only, no registration
   {
-    id: 'scan_mh12',
-    gmailMessageId: 'msg_scan_mh12',
-    gmailAttachmentId: 'att_mh12',
-    subject: 'Allstate comprehensive motor cover 2026 MH-12-XY-9876',
-    from: 'Allstate <motor@allstate.com>',
-    date: days(5),
-    fileName: 'allstate-comp-mh12xy9876-2026.pdf',
+    id: 'scan_ambiguous',
+    gmailMessageId: 'msg_scan_amb',
+    gmailAttachmentId: 'att_amb',
+    subject: 'Motor policy document — please verify vehicle',
+    from: 'Unknown Insurer <noreply@insurer.example>',
+    date: days(1),
+    fileName: 'motor-policy-unclear.pdf',
     mimeType: 'application/pdf',
-    sizeBytes: 250_000,
-    previewSnippet: 'Package Policy comprehensive — insurer switch',
-    contentRef: 'fnv1a-mh12-scan',
-    status: 'pending',
+    sizeBytes: 150_000,
+    previewSnippet: 'Vehicle insurance for Honda City holder Pradhul Dev — registration not printed clearly',
+    contentRef: 'fnv1a-amb',
+    status: 'needs_subject_confirm',
+    subjectAmbiguous: true,
+    possibleSubjectKeys: ['vehicle:reg:KA01AB1234', 'vehicle:reg:MH12XY9876', 'vehicle:reg:DL01CD4321'],
     classification: {
       category: 'Insurance/Vehicle',
-      title: 'Allstate Package · MH-12-XY-9876',
+      title: 'Motor policy (subject unclear)',
       metadata: {
-        issuer: 'Allstate',
-        documentType: 'Package / comprehensive policy',
-        referenceNumber: 'AS-2026-99',
+        issuer: 'Unknown Insurer',
+        documentType: 'Package Policy',
         holderName: 'Pradhul Dev',
-        registrationNumber: 'MH-12-XY-9876',
-        issueDate: '2026-05-06',
-        expiryDate: '2027-05-05',
+        vehicleMakeModel: 'Honda City',
         coverageType: 'comprehensive',
-        coverageSlots: 'own_damage,third_party',
-        subjectKey: 'vehicle:reg:MH12XY9876',
-        subjectLabel: 'MH-12-XY-9876',
+        issueDate: '2026-01-10',
+        expiryDate: '2027-01-09',
       },
-      confidence: 0.95,
+      confidence: 0.7,
       isImportantDocument: true,
+      reason: 'Registration missing — confirm subject before filing',
     },
   },
   {

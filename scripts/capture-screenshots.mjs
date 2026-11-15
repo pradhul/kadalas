@@ -12,7 +12,7 @@ async function waitForText(page, text, timeout = 25000) {
 
 async function shot(page, name) {
   const file = path.join(OUT, name);
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(400);
   await page.screenshot({ path: file, fullPage: false });
   console.log('saved', file);
 }
@@ -20,80 +20,79 @@ async function shot(page, name) {
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
-await page.goto(BASE, { waitUntil: 'networkidle', timeout: 60000 });
+await page.goto(`${BASE}/sign-in?t=${Date.now()}`, { waitUntil: 'networkidle', timeout: 60000 });
 await page.evaluate(() => localStorage.clear());
-await page.goto(`${BASE}/sign-in`, { waitUntil: 'networkidle', timeout: 60000 });
+await page.reload({ waitUntil: 'networkidle' });
 await waitForText(page, 'Continue with mock Google');
 await shot(page, 'screenshot-signin.png');
 
 await page.getByText('Continue with mock Google').click();
 await waitForText(page, "Pradhul's vault", 30000);
-await page.waitForTimeout(1200);
+await page.waitForTimeout(800);
 await shot(page, 'screenshot-vault.png');
 
-// Vehicle cover view (KA-01-AB-1234 OD + TP)
-await waitForText(page, 'KA-01-AB-1234', 20000);
-await page.getByText('KA-01-AB-1234', { exact: false }).first().click();
-await waitForText(page, 'Own Damage', 20000);
-await waitForText(page, 'Third Party', 10000);
-await shot(page, 'screenshot-vehicle-cover.png');
-
-await page.goto(`${BASE}/(tabs)`, { waitUntil: 'networkidle' }).catch(() =>
-  page.goto(BASE, { waitUntil: 'networkidle' }),
-);
-await page.waitForTimeout(800);
-
-// Document sync on OD policy
-await page.goto(BASE, { waitUntil: 'networkidle' });
-await waitForText(page, 'Progressive Standalone OD', 20000);
-await page.getByText('Progressive Standalone OD', { exact: false }).first().click();
-await waitForText(page, 'Sync from Gmail', 20000);
-await page.getByRole('button', { name: 'Sync' }).click();
-await page.waitForTimeout(1500);
-await shot(page, 'screenshot-document-sync.png');
-
-// Scan tab — start full scan briefly for progress UI
+// Full mailbox scan
 await page.goto(`${BASE}/scan`, { waitUntil: 'networkidle' });
 await waitForText(page, 'Scan Gmail', 20000);
-const fullScan = page.getByText('Full mailbox scan', { exact: false });
-if (await fullScan.count()) {
-  // lastScanAt is set in mocks, so incremental UI may show instead
-}
+
 const again = page.getByText('Run full mailbox scan again', { exact: false });
-if (await again.count()) {
-  await again.first().click();
-} else if (await fullScan.count()) {
-  await fullScan.first().click();
-}
-await page.waitForTimeout(2500);
+const full = page.getByText('Full mailbox scan', { exact: false });
+if (await again.count()) await again.first().click();
+else if (await full.count()) await full.first().click();
+
+// Capture while running (Pause visible)
+await page.getByRole('button', { name: 'Pause' }).waitFor({ timeout: 60000 });
+await waitForText(page, 'Emails checked', 15000);
 await shot(page, 'screenshot-scan-progress.png');
 
-const pauseBtn = page.getByRole('button', { name: 'Pause' });
-if (await pauseBtn.count()) {
-  await pauseBtn.click();
-  await page.waitForTimeout(600);
-  await shot(page, 'screenshot-scan-paused.png');
-} else {
-  // Quota pause may already be visible
-  await shot(page, 'screenshot-scan-paused.png');
+// Wait for quota pause — do not click Pause
+const quotaHints = [
+  'Paused — AI quota',
+  'AI quota / rate limit',
+  'free-tier quota',
+  'Mock free-tier quota',
+];
+let paused = false;
+const deadline = Date.now() + 120_000;
+while (Date.now() < deadline && !paused) {
+  const body = await page.locator('body').innerText();
+  if (quotaHints.some((h) => body.includes(h)) && body.includes('Resume')) {
+    paused = true;
+    break;
+  }
+  // Still running?
+  if (body.includes('Completed') || body.includes('Cancelled')) {
+    console.log('scan ended without quota pause; body snippet:\n', body.slice(0, 800));
+    break;
+  }
+  await page.waitForTimeout(500);
 }
+if (!paused) {
+  // Force a diagnostic shot then fail
+  await shot(page, 'screenshot-scan-paused-FAILED.png');
+  throw new Error('Timed out waiting for quota pause UI');
+}
+await shot(page, 'screenshot-scan-paused.png');
 
 // Grouped review
 await page.goto(`${BASE}/scan-review`, { waitUntil: 'networkidle' });
 const loadDemo = page.getByText('Load demo review list', { exact: false });
-if (await loadDemo.count()) {
-  await loadDemo.click();
-  await page.waitForTimeout(800);
-}
-await waitForText(page, 'Approve', 25000).catch(() => null);
+if (await loadDemo.count()) await loadDemo.click();
+await waitForText(page, '4 versions found, keeping 2026-27 policy', 25000);
 await shot(page, 'screenshot-scan-review.png');
+
+await page.goto(BASE, { waitUntil: 'networkidle' });
+await waitForText(page, 'KA-01-AB-1234', 20000);
+await page.getByText('KA-01-AB-1234', { exact: false }).first().click();
+await waitForText(page, 'Own Damage', 20000);
+await shot(page, 'screenshot-vehicle-cover.png');
 
 await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
 await waitForText(page, 'AI provider', 20000);
 await shot(page, 'screenshot-settings.png');
 
 await page.goto(`${BASE}/expiring`, { waitUntil: 'networkidle' });
-await page.waitForTimeout(800);
+await page.waitForTimeout(500);
 await shot(page, 'screenshot-expiring.png');
 
 await browser.close();

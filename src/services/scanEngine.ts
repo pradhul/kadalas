@@ -83,7 +83,8 @@ export class ScanEngine {
     this.vaultDocuments = vaultIndex.documents;
     if (!this.state) await this.hydrate();
     if (!this.state) return;
-    if (useMocks()) getAiService().__setMockQuotaFailAfter?.(8);
+    // After a quota pause, allow another short burst then pause again in mocks
+    if (useMocks()) getAiService().__setMockQuotaFailAfter?.(3);
     const next = resumeScan(this.state);
     this.stopRequested = null;
     this.emit(next);
@@ -145,7 +146,8 @@ export class ScanEngine {
             const next = pauseForQuota(
               this.state,
               { message: err instanceof Error ? err.message : String(err), status },
-              useMocks() ? 15_000 : 60 * 60 * 1000,
+              // Keep paused long enough to inspect / screenshot; user can Resume anytime
+              useMocks() ? 30 * 60 * 1000 : 60 * 60 * 1000,
             );
             this.emit(next);
             await saveScanJobState(next);

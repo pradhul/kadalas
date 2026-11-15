@@ -99,14 +99,38 @@ export function enrichCandidateWithSubject(candidate: ScanCandidate): ScanCandid
     : undefined;
   const ambiguous = resolution.ambiguous || !resolution.subjectKey || resolution.confidence < 0.7;
 
+  const possibleSubjectKeys = ambiguous
+    ? buildPossibleSubjectKeys(metadata, resolution.subjectKey)
+    : candidate.possibleSubjectKeys;
+
   return {
     ...candidate,
     classification: { ...candidate.classification, metadata },
     groupId,
     groupLabel: buildGroupLabel(resolution.subjectLabel, family, metadata.documentType),
     subjectAmbiguous: ambiguous,
+    possibleSubjectKeys,
     status: ambiguous && candidate.status === 'pending' ? 'needs_subject_confirm' : candidate.status,
   };
+}
+
+function buildPossibleSubjectKeys(
+  metadata: import('../types/document').DocumentMetadata,
+  weakKey?: string | null,
+): string[] {
+  const keys: string[] = [];
+  if (metadata.registrationNumber) {
+    keys.push(`vehicle:reg:${metadata.registrationNumber.toUpperCase().replace(/[^A-Z0-9]/g, '')}`);
+  }
+  if (metadata.chassisNumber) {
+    keys.push(`vehicle:chassis:${metadata.chassisNumber.toUpperCase().replace(/[^A-Z0-9]/g, '')}`);
+  }
+  if (weakKey && !keys.includes(weakKey)) keys.push(weakKey);
+  // Demo-friendly defaults when AI found nothing durable
+  if (!keys.length) {
+    keys.push('vehicle:reg:KA01AB1234', 'vehicle:reg:MH12XY9876');
+  }
+  return keys;
 }
 
 export function buildGroupLabel(
@@ -193,9 +217,10 @@ export function groupCandidatesBySubject(candidates: ScanCandidate[]): {
         documents: asDocs,
       });
       coverageSummary = view.summary;
+      const period = latestPeriodLabel(sorted[0]);
       summary =
-        older.length > 0
-          ? `${view.summary} · ${members.length} policies found, ${older.length} superseded`
+        members.length > 1
+          ? `${subjectLabel}: ${members.length} versions found, keeping ${period} policy`
           : view.summary;
     } else {
       currentDocs = [sorted[0]];
@@ -203,7 +228,7 @@ export function groupCandidatesBySubject(candidates: ScanCandidate[]): {
       const period = latestPeriodLabel(sorted[0]);
       summary =
         older.length > 0
-          ? `${subjectLabel}: ${sorted.length} versions found, keeping ${period}`
+          ? `${subjectLabel}: ${sorted.length} versions found, keeping ${period} policy`
           : `${subjectLabel}: latest document`;
     }
 
@@ -214,6 +239,7 @@ export function groupCandidatesBySubject(candidates: ScanCandidate[]): {
       groupVersionCount: members.length,
       olderVersionIds: olderIds,
       groupLabel: subjectLabel,
+      groupSummary: summary,
       status: c.status === 'skipped' || c.status === 'duplicate' ? c.status : 'pending',
     }));
     const olderOut: ScanCandidate[] = older.map((o) => ({
@@ -221,6 +247,7 @@ export function groupCandidatesBySubject(candidates: ScanCandidate[]): {
       isGroupLatest: false,
       groupVersionCount: members.length,
       groupLabel: subjectLabel,
+      groupSummary: summary,
       status: 'duplicate' as const,
       duplicateOfId: currentOut[0]?.id,
     }));
@@ -262,7 +289,8 @@ function latestPeriodLabel(c: VersionedCandidate): string {
   if (meta.expiryDate) {
     const y = meta.expiryDate.slice(0, 4);
     const prev = String(Number(y) - 1);
-    return `${prev.slice(2)}-${y.slice(2)}`;
+    // e.g. expiry 2027-05-05 → "2026-27"
+    return `${prev}-${y.slice(2)}`;
   }
   if (meta.issueDate) return meta.issueDate.slice(0, 4);
   if (c.date) return c.date.slice(0, 4);
@@ -309,10 +337,12 @@ export function buildGroupedReview(candidates: ScanCandidate[]): Array<{
   }> = [];
 
   for (const g of groups) {
+    const subtitleParts = [g.summary];
+    if (g.coverageSummary && g.coverageSummary !== g.summary) subtitleParts.push(g.coverageSummary);
     rows.push({
       id: g.groupId,
       title: g.subjectLabel,
-      subtitle: g.coverageSummary || g.summary,
+      subtitle: subtitleParts.join(' · '),
       kind: 'subject',
       candidates: [...g.currentDocs, ...g.older],
     });

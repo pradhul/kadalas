@@ -126,7 +126,7 @@ export default function ScanScreen() {
                   setError(null);
                   setStarting(true);
                   try {
-                    await startMailboxScan({ mode: 'full', mockQuotaAfter: useMocks() ? 3 : undefined });
+                    await startMailboxScan({ mode: 'full', mockQuotaAfter: useMocks() ? 1 : undefined });
                   } catch (e) {
                     setError(e instanceof Error ? e.message : String(e));
                   } finally {
@@ -181,7 +181,7 @@ export default function ScanScreen() {
                 onPress={async () => {
                   setStarting(true);
                   try {
-                    await startMailboxScan({ mode: 'full', mockQuotaAfter: useMocks() ? 3 : undefined });
+                    await startMailboxScan({ mode: 'full', mockQuotaAfter: useMocks() ? 1 : undefined });
                   } finally {
                     setStarting(false);
                   }

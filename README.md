@@ -17,7 +17,7 @@ By default the app runs in **mock mode** so you can exercise every screen withou
 ```bash
 npm install
 npm run web          # http://localhost:43123
-npm test             # unit tests (matching, dedup, versioning, categorisation)
+npm test             # unit tests (scan resume/quota, grouping, coverage slots, matching, …)
 npm run typecheck    # Expo / TypeScript checks
 ```
 
@@ -37,10 +37,35 @@ Set `EXPO_PUBLIC_USE_MOCKS=false` (and configure OAuth client IDs) when you want
 
 1. **Add documents** — pick PDF/image (or demo sample); AI or rules suggest category/title/metadata; save into the right Drive folder.
 2. **Per-document Sync** — search Gmail for a newer version of the same *subject* (e.g. registration), not just policy number; confirm; promote to current and keep history in `_versions`.
-3. **Scan Gmail** — resumable full-mailbox / lookback / incremental pipeline (search → rules → cheap AI triage → classify → entity grouping). Pauses on free-tier AI quota; progress + pause/resume UI; approve while scanning continues.
-4. **Entity grouping + coverage slots** — documents group by subject key (registration / chassis / …). Vehicle insurance uses generic **coverage slots** `own_damage` and `third_party`: a **comprehensive / package / bundled** policy fills both; **Standalone OD** / **Liability Only** / **Act Only** fill one. A vault can hold several *current* docs per vehicle (e.g. 5-year TP + annual OD). Newer comprehensive supersedes both slots; newer OD-only leaves an active long-term TP alone. See the **vehicle cover** screen.
+3. **Scan Gmail** — see [Full resumable mailbox scan](#full-resumable-mailbox-scan) below.
+4. **Entity grouping + coverage slots** — see [Entity-aware grouping](#entity-aware-grouping) and [Vehicle cover](#vehicle-cover-india-style-od--tp).
 5. **Browse / search / expiring** — folder tree, vehicles list, metadata search, per-slot gaps & upcoming expiry in Expiring soon.
 6. **Settings** — paste Gemini (or other) API key; usage / queue / 429 backoff; works without a key via rule-based categorisation.
+
+### Full resumable mailbox scan
+
+First run offers **Full mailbox scan** (all-time `has:attachment` query — no `after:`) or a lookback window. Later runs default to **incremental** (since `lastScanAt`) with an option to re-run full.
+
+Staged pipeline (persisted to Drive `scan-state.json` + local cache after every step):
+
+1. **Search** — paginated Gmail attachment listing (page token saved for resume)
+2. **Rule pre-filter** — drop logos, tiny images, obvious promos (no AI)
+3. **Cheap AI triage** — batched metadata-only (`from` / `subject` / `filename` / `snippet`); no PDF download yet
+4. **Classify** — download + full AI classify for triage-kept items; candidates appear in **Review** incrementally
+5. **Entity grouping / dedupe** — subject-key groups; older versions marked duplicate → `_versions` on approve
+
+**Quota:** free-tier 429 / mock quota pauses the job (`paused_quota`) with Resume + auto-resume timer. User Pause (`paused_user`) also persists. Closing the app mid-scan restores state from Drive/local on next open.
+
+Progress UI shows stage label, emails checked / estimated total, attachments filtered / triage kept, documents found, AI calls, and a progress bar.
+
+### Entity-aware grouping
+
+Documents group by **document-type family + subject key** (registration / chassis / …), **not** policy number — so renewals and insurer switches stay one entity.
+
+- Only the **latest** policy (or latest per coverage slot) stays current for review/approve
+- Older members are marked `duplicate` and filed under Drive `_versions` when the current one is approved
+- Review copy example: `DL-01-CD-4321: 4 versions found, keeping 2026-27 policy`
+- **Ambiguous** subjects (e.g. make/model + holder, no registration) get `needs_subject_confirm` with suggested subject keys
 
 ### Vehicle cover (India-style OD + TP)
 

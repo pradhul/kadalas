@@ -129,7 +129,9 @@ export class RequestQueue {
       task.resolve(result);
     } catch (err) {
       const status = getHttpStatus(err);
-      if (status === 429 && task.attempts < this.options.maxRetries) {
+      const noRetry = Boolean(err && typeof err === 'object' && (err as { noRetry?: boolean }).noRetry);
+      // Intentional quota-pause errors (noRetry) must surface to the scan engine
+      if (!noRetry && status === 429 && task.attempts < this.options.maxRetries) {
         task.attempts += 1;
         const backoff =
           this.options.baseBackoffMs * Math.pow(2, task.attempts - 1) + Math.floor(Math.random() * 250);

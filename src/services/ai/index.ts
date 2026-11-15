@@ -74,9 +74,14 @@ export function createAiService(): AiService {
   const run = async <T>(fn: () => Promise<T>): Promise<T> => {
     return queue.enqueue(async () => {
       if (mockQuotaFailAfter != null && callsSinceResume >= mockQuotaFailAfter) {
-        callsSinceResume = 0;
-        const err = new Error('Mock free-tier quota exceeded (429)') as Error & { status: number };
+        // Do not reset the counter here — retries would immediately succeed.
+        // Counter resets only on __setMockQuotaFailAfter (start / resume).
+        const err = new Error('Mock free-tier quota exceeded (429)') as Error & {
+          status: number;
+          noRetry: boolean;
+        };
         err.status = 429;
+        err.noRetry = true; // scan engine must pause; queue must not backoff-retry
         lastError = err.message;
         emit(queue.getStats().pending + queue.getStats().active, Date.now() + 60_000);
         throw err;

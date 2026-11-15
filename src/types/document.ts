@@ -143,6 +143,10 @@ export interface ScanCandidate {
   groupVersionCount?: number;
   /** Ambiguous subject — user should confirm/merge */
   subjectAmbiguous?: boolean;
+  /** Suggested subject keys when status is needs_subject_confirm */
+  possibleSubjectKeys?: string[];
+  /** Human summary from entity grouping (e.g. "4 versions found, keeping 2026-27 policy") */
+  groupSummary?: string;
 }
 
 export interface SyncSuggestion {

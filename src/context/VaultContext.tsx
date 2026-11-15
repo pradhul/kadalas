@@ -122,7 +122,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         lookbackDays: options.lookbackDays,
         sinceIso: options.mode === 'incremental' ? index.lastScanAt : null,
         vaultIndex: index,
-        mockQuotaAfter: options.mockQuotaAfter ?? (useMocks() ? 3 : undefined),
+        // Fail quickly in mocks so progress → quota-pause is easy to demo
+        mockQuotaAfter: options.mockQuotaAfter ?? (useMocks() ? 1 : undefined),
       });
     },
     [index],

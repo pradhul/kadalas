@@ -6,7 +6,8 @@ import { Banner, Button, Screen, SectionTitle } from '../components/ui';
 import { colors, radii, spacing, typography } from '../constants/theme';
 import { useVault } from '../context/VaultContext';
 import { formatCoverageType } from '../lib/coverageSlots';
-import { buildGroupedReview } from '../lib/grouping';
+import { buildGroupedReview, groupCandidatesBySubject } from '../lib/grouping';
+import { MOCK_SCAN_CANDIDATES } from '../mocks/data';
 import type { ScanCandidate } from '../types/document';
 
 export default function ScanReviewScreen() {
@@ -61,9 +62,9 @@ export default function ScanReviewScreen() {
                   title="Load demo review list"
                   variant="secondary"
                   onPress={() => {
-                    const { MOCK_SCAN_CANDIDATES } = require('../mocks/data');
-                    const { groupCandidatesBySubject } = require('../lib/grouping');
-                    const { flat } = groupCandidatesBySubject(MOCK_SCAN_CANDIDATES);
+                    const { flat } = groupCandidatesBySubject(
+                      MOCK_SCAN_CANDIDATES.filter((c) => c.status !== 'skipped'),
+                    );
                     seedScanCandidates(flat);
                   }}
                 />
@@ -116,7 +117,7 @@ function CandidateCard({
 }) {
   const m = c.classification?.metadata ?? {};
   const done = c.status === 'approved' || c.status === 'rejected' || c.status === 'duplicate';
-  const possibleKeys = (c as ScanCandidate & { possibleSubjectKeys?: string[] }).possibleSubjectKeys;
+  const possibleKeys = c.possibleSubjectKeys;
   return (
     <View style={[styles.card, done && styles.cardDone]}>
       <Text style={styles.cardTitle}>{c.fileName}</Text>

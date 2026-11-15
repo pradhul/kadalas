@@ -71,6 +71,7 @@ describe('groupCandidatesBySubject', () => {
     const g = groups[0];
     expect(g.currentDocs.map((c) => c.id).sort()).toEqual(['od', 'tp']);
     expect(g.older.map((c) => c.id)).toContain('old_comp');
+    expect(g.summary).toMatch(/3 versions found, keeping/);
     expect(g.coverageSummary).toMatch(/Progressive/);
     expect(g.coverageSummary).toMatch(/Go Digit/);
   });
