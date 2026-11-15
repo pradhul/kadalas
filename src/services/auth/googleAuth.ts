@@ -1,7 +1,7 @@
 import * as ExpoAuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
-import { getGoogleOAuthConfig, GOOGLE_SCOPES } from '../config';
+import { getGoogleOAuthConfig, getOAuthRedirectUri, GOOGLE_SCOPES } from '../config';
 import { clearAuthTokens, getAuthTokens, saveAuthTokens, StoredTokens } from '../secureStorage';
 import { AuthService, AuthSession } from './types';
 
@@ -103,9 +103,8 @@ export function createGoogleAuthService(): AuthService {
         );
       }
 
-      const redirectUri = ExpoAuthSession.makeRedirectUri({
-        scheme: 'kadalas',
-      });
+      // Web: window.location.origin (any deploy host). Native: kadalas:// scheme.
+      const redirectUri = getOAuthRedirectUri('kadalas');
 
       const request = new ExpoAuthSession.AuthRequest({
         clientId,

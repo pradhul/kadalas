@@ -1,17 +1,30 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { AuthSession, getAuthService } from '../services/auth';
-import { useMocks } from '../services/config';
+import { AuthSession, getAuthService, resetAuthService } from '../services/auth';
+import { createMockAuthService } from '../services/auth/mockAuth';
+import { setForceDemoMode, useMocks } from '../services/config';
+import { resetAiService } from '../services/ai';
+import { resetDriveService } from '../services/drive';
+import { resetGmailService } from '../services/gmail';
 
 interface AuthContextValue {
   session: AuthSession | null;
   loading: boolean;
   isMock: boolean;
   signIn: () => Promise<void>;
+  /** Explore the app with seeded demo data even when the build is in real (non-mock) mode. */
+  signInWithDemo: () => Promise<void>;
   signOut: () => Promise<void>;
   error: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function resetServiceSingletons() {
+  resetAuthService();
+  resetDriveService();
+  resetGmailService();
+  resetAiService();
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -39,6 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     setLoading(true);
     try {
+      setForceDemoMode(false);
+      resetServiceSingletons();
       const next = await getAuthService().signIn();
       setSession(next);
     } catch (e) {
@@ -49,8 +64,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const signInWithDemo = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      setForceDemoMode(true);
+      resetServiceSingletons();
+      const next = await createMockAuthService().signIn();
+      setSession(next);
+    } catch (e) {
+      setForceDemoMode(false);
+      resetServiceSingletons();
+      setError(e instanceof Error ? e.message : String(e));
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const signOut = useCallback(async () => {
-    await getAuthService().signOut();
+    try {
+      await getAuthService().signOut();
+    } catch {
+      // ignore — still clear local session / demo flag
+    }
+    setForceDemoMode(false);
+    resetServiceSingletons();
     setSession(null);
   }, []);
 
@@ -60,10 +99,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       isMock: useMocks() || Boolean(session?.isMock),
       signIn,
+      signInWithDemo,
       signOut,
       error,
     }),
-    [session, loading, signIn, signOut, error],
+    [session, loading, signIn, signInWithDemo, signOut, error],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

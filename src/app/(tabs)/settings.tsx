@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Banner, Button, Field, Screen, SectionTitle } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
@@ -15,13 +16,31 @@ import {
 } from '../../services/secureStorage';
 import { AiProviderId, AiUsageStats } from '../../types/document';
 
+async function openExternal(url: string) {
+  if (Platform.OS === 'web') {
+    await Linking.openURL(url);
+    return;
+  }
+  await WebBrowser.openBrowserAsync(url);
+}
+
 export default function SettingsScreen() {
   const { session, signOut, isMock } = useAuth();
+  const { width } = useWindowDimensions();
   const [provider, setProvider] = useState<AiProviderId>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [saved, setSaved] = useState(false);
   const [usage, setUsage] = useState<AiUsageStats | null>(null);
   const [hasKey, setHasKey] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const selected = useMemo(
+    () => AI_PROVIDER_OPTIONS.find((o) => o.id === provider) ?? AI_PROVIDER_OPTIONS[0],
+    [provider],
+  );
+
+  const compact = width < 420;
 
   useEffect(() => {
     const ai = getAiService();
@@ -38,12 +57,14 @@ export default function SettingsScreen() {
   return (
     <Screen>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, compact && styles.contentCompact]}>
           <SectionTitle title="Settings" subtitle="Account, AI providers, and storage mode." />
 
           <View style={styles.card}>
             <Text style={styles.label}>Signed in</Text>
-            <Text style={styles.value}>{session?.user.email}</Text>
+            <Text style={styles.value} numberOfLines={2}>
+              {session?.user.email}
+            </Text>
             <Text style={styles.meta}>{isMock || useMocks() ? 'Mock Google session' : 'Google OAuth'}</Text>
             <View style={{ marginTop: spacing.md }}>
               <Button
@@ -78,28 +99,52 @@ export default function SettingsScreen() {
                   setApiKey(existing || '');
                   setHasKey(await getAiService().hasApiKey());
                   setSaved(false);
+                  setTestResult(null);
                 }}
                 style={[styles.provider, provider === opt.id && styles.providerActive]}
               >
-                <Text style={styles.providerTitle}>{opt.label}</Text>
+                <View style={styles.providerHeader}>
+                  <Text style={styles.providerTitle}>{opt.label}</Text>
+                  {opt.tier === 'paid' ? (
+                    <Text style={styles.paidBadge}>paid</Text>
+                  ) : opt.tier === 'free' ? (
+                    <Text style={styles.freeBadge}>free</Text>
+                  ) : null}
+                </View>
                 <Text style={styles.meta}>{opt.hint}</Text>
               </Pressable>
             ))}
           </View>
 
           {provider !== 'mock' ? (
-            <>
+            <View style={styles.keyBlock}>
+              <Text style={styles.instructions}>{selected.instructions}</Text>
+              {selected.getKeyUrl ? (
+                <Pressable
+                  accessibilityRole="link"
+                  onPress={() => void openExternal(selected.getKeyUrl!)}
+                  style={styles.linkRow}
+                >
+                  <Text style={styles.link}>{selected.getKeyCta ?? 'Get a free key'}</Text>
+                  <Text style={styles.linkHint} numberOfLines={1}>
+                    {selected.getKeyUrl.replace(/^https?:\/\//, '')}
+                  </Text>
+                </Pressable>
+              ) : null}
+
               <Field
-                label={`${provider} API key`}
+                label={`${selected.label} API key`}
                 value={apiKey}
                 onChangeText={(v) => {
                   setApiKey(v);
                   setSaved(false);
+                  setTestResult(null);
                 }}
                 placeholder="Paste key"
                 secureTextEntry
+                showToggle
               />
-              <View style={styles.row}>
+              <View style={[styles.row, compact && styles.rowWrap]}>
                 <Button
                   title={saved ? 'Saved' : 'Save key'}
                   onPress={async () => {
@@ -107,6 +152,28 @@ export default function SettingsScreen() {
                     await getAiService().setProvider(provider);
                     setHasKey(await getAiService().hasApiKey());
                     setSaved(true);
+                    setTestResult(null);
+                  }}
+                />
+                <Button
+                  title="Test key"
+                  variant="secondary"
+                  loading={testing}
+                  onPress={async () => {
+                    setTesting(true);
+                    setTestResult(null);
+                    try {
+                      if (apiKey.trim()) {
+                        await saveAiApiKey(provider, apiKey);
+                        await getAiService().setProvider(provider);
+                        setSaved(true);
+                      }
+                      const result = await getAiService().testKey();
+                      setTestResult(result);
+                      setHasKey(await getAiService().hasApiKey());
+                    } finally {
+                      setTesting(false);
+                    }
                   }}
                 />
                 <Button
@@ -117,11 +184,17 @@ export default function SettingsScreen() {
                     setApiKey('');
                     setHasKey(false);
                     setSaved(false);
+                    setTestResult(null);
                   }}
                 />
               </View>
-            </>
-          ) : null}
+              {testResult ? (
+                <Banner tone={testResult.ok ? 'info' : 'warn'}>{testResult.message}</Banner>
+              ) : null}
+            </View>
+          ) : (
+            <Banner>{selected.instructions}</Banner>
+          )}
 
           <View style={styles.card}>
             <Text style={styles.label}>Usage</Text>
@@ -157,7 +230,8 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, maxWidth: 720, width: '100%', alignSelf: 'center' },
+  contentCompact: { paddingHorizontal: spacing.md },
   card: {
     backgroundColor: colors.paperElevated,
     borderRadius: radii.lg,
@@ -183,6 +257,31 @@ const styles = StyleSheet.create({
     borderColor: colors.teal,
     backgroundColor: colors.tealSoft,
   },
-  providerTitle: { ...typography.bodyStrong, color: colors.ink },
-  row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', marginBottom: spacing.lg },
+  providerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: 2,
+  },
+  providerTitle: { ...typography.bodyStrong, color: colors.ink, flexShrink: 1 },
+  freeBadge: {
+    ...typography.caption,
+    color: colors.teal,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  paidBadge: {
+    ...typography.caption,
+    color: colors.amber,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  keyBlock: { marginBottom: spacing.lg },
+  instructions: { ...typography.caption, color: colors.inkMuted, marginBottom: spacing.sm },
+  linkRow: { marginBottom: spacing.md, gap: 2 },
+  link: { ...typography.bodyStrong, color: colors.teal },
+  linkHint: { ...typography.caption, color: colors.inkMuted },
+  row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', marginBottom: spacing.md, flexWrap: 'wrap' },
+  rowWrap: { flexDirection: 'column', alignItems: 'stretch' },
 });

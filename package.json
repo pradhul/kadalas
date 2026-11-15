@@ -1,6 +1,6 @@
 {
   "name": "kadalas",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Kadalas — personal papers vault (Expo): Gmail scan, Google Drive storage, BYOK AI",
   "license": "MIT",
   "author": "Pradhul",
@@ -56,6 +56,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web --port 43123",
     "web:export": "expo export --platform web",
+    "build:web": "expo export --platform web && node scripts/prepare-web-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "lint": "expo lint"

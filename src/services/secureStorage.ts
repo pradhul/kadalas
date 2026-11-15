@@ -54,7 +54,14 @@ export async function savePreferredProvider(provider: AiProviderId): Promise<voi
 
 export async function getPreferredProvider(): Promise<AiProviderId> {
   const value = await getItem(AI_PROVIDER_KEY);
-  if (value === 'openai' || value === 'anthropic' || value === 'openrouter' || value === 'gemini' || value === 'mock') {
+  if (
+    value === 'openai' ||
+    value === 'anthropic' ||
+    value === 'openrouter' ||
+    value === 'groq' ||
+    value === 'gemini' ||
+    value === 'mock'
+  ) {
     return value;
   }
   return 'gemini';

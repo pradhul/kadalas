@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useMocks } from '../services/config';
 
 export default function SignInScreen() {
-  const { session, signIn, loading, error, isMock } = useAuth();
+  const { session, signIn, signInWithDemo, loading, error } = useAuth();
   const { width } = useWindowDimensions();
   const fade = useRef(new Animated.Value(0)).current;
   const rise = useRef(new Animated.Value(18)).current;
@@ -23,30 +23,40 @@ export default function SignInScreen() {
   if (session) return <Redirect href="/(tabs)" />;
 
   const desktop = width >= 900;
+  const narrow = width < 420;
+  const mocksOn = useMocks();
 
   return (
     <Screen>
       <LinearGradientFallback />
-      <View style={[styles.wrap, desktop && styles.wrapDesktop]}>
-        <Animated.View style={[styles.hero, { opacity: fade, transform: [{ translateY: rise }] }]}>
+      <View style={[styles.wrap, desktop && styles.wrapDesktop, narrow && styles.wrapNarrow]}>
+        <Animated.View
+          style={[styles.hero, narrow && styles.heroNarrow, { opacity: fade, transform: [{ translateY: rise }] }]}
+        >
           <BrandMark large />
-          <Text style={styles.headline}>Your papers,{'\n'}in your Drive.</Text>
+          <Text style={[styles.headline, narrow && styles.headlineNarrow]}>Your papers,{'\n'}in your Drive.</Text>
           <Text style={styles.sub}>
             Sign in with Google. Documents stay in your account — the app never hosts your files or AI keys.
           </Text>
 
-          {useMocks() || isMock ? (
+          {mocksOn ? (
             <Banner>
               Demo mode is on (EXPO_PUBLIC_USE_MOCKS). Sign-in uses a local mock session so you can explore every
               screen without Google credentials.
             </Banner>
-          ) : null}
+          ) : (
+            <Banner>
+              Real Google mode. OAuth redirect uses this site’s origin
+              ({typeof window !== 'undefined' ? window.location.origin : 'window.location.origin'}). Add that URL as an
+              authorized redirect URI in Google Cloud Console.
+            </Banner>
+          )}
 
           {error ? <Banner tone="warn">{error}</Banner> : null}
 
           <View style={styles.actions}>
             <Button
-              title={useMocks() ? 'Continue with mock Google' : 'Continue with Google'}
+              title={mocksOn ? 'Continue with mock Google' : 'Continue with Google'}
               loading={loading}
               onPress={async () => {
                 try {
@@ -57,10 +67,28 @@ export default function SignInScreen() {
                 }
               }}
             />
+            {!mocksOn ? (
+              <Button
+                title="Try demo data"
+                variant="secondary"
+                disabled={loading}
+                onPress={async () => {
+                  try {
+                    await signInWithDemo();
+                    router.replace('/(tabs)');
+                  } catch {
+                    // error surfaced via context
+                  }
+                }}
+              />
+            ) : null}
           </View>
 
           <Text style={styles.scopes}>
             Requests gmail.readonly + drive.file. Drive access is limited to files this app creates.
+            {!useMocks()
+              ? ' Use “Try demo data” to explore seeded vault content without connecting Google.'
+              : ''}
           </Text>
         </Animated.View>
       </View>
@@ -75,6 +103,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
   },
+  wrapNarrow: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
+  },
   wrapDesktop: {
     justifyContent: 'center',
     alignItems: 'flex-start',
@@ -84,11 +116,19 @@ const styles = StyleSheet.create({
   hero: {
     gap: spacing.md,
     maxWidth: 520,
+    width: '100%',
+  },
+  heroNarrow: {
+    maxWidth: '100%',
   },
   headline: {
     ...typography.brand,
     color: colors.ink,
     marginTop: spacing.sm,
+  },
+  headlineNarrow: {
+    fontSize: 34,
+    lineHeight: 40,
   },
   sub: {
     ...typography.body,
@@ -98,6 +138,8 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: spacing.sm,
     maxWidth: 360,
+    width: '100%',
+    gap: spacing.sm,
   },
   scopes: {
     ...typography.caption,

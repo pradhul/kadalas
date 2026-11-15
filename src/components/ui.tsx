@@ -77,6 +77,7 @@ export function Field({
   placeholder,
   secureTextEntry,
   multiline,
+  showToggle,
 }: {
   label: string;
   value: string;
@@ -84,20 +85,37 @@ export function Field({
   placeholder?: string;
   secureTextEntry?: boolean;
   multiline?: boolean;
+  /** When true with secureTextEntry, show a Show/Hide control (API keys on mobile web). */
+  showToggle?: boolean;
 }) {
+  const [revealed, setRevealed] = React.useState(false);
+  const hide = Boolean(secureTextEntry) && !(showToggle && revealed);
+
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        {showToggle && secureTextEntry ? (
+          <Pressable onPress={() => setRevealed((v) => !v)} accessibilityRole="button">
+            <Text style={styles.showToggle}>{revealed ? 'Hide' : 'Show'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <TextInput
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.inkMuted}
-        secureTextEntry={secureTextEntry}
+        secureTextEntry={hide}
         multiline={multiline}
         style={[styles.input, multiline && styles.inputMultiline]}
         autoCapitalize="none"
         autoCorrect={false}
+        autoComplete="off"
+        textContentType="none"
+        spellCheck={false}
+        importantForAutofill="no"
+        keyboardType="visible-password"
       />
     </View>
   );
@@ -204,7 +222,14 @@ const styles = StyleSheet.create({
   btnTextDark: { color: colors.ink },
   btnTextLight: { color: '#fff' },
   field: { gap: spacing.xs, marginBottom: spacing.md },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   fieldLabel: { ...typography.label, color: colors.inkMuted },
+  showToggle: { ...typography.label, color: colors.teal },
   input: {
     ...typography.body,
     color: colors.ink,

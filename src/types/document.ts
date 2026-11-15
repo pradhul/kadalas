@@ -161,7 +161,7 @@ export interface SyncSuggestion {
   reason: string;
 }
 
-export type AiProviderId = 'gemini' | 'openai' | 'anthropic' | 'openrouter' | 'mock';
+export type AiProviderId = 'gemini' | 'openai' | 'anthropic' | 'openrouter' | 'groq' | 'mock';
 
 export interface AiUsageStats {
   requestsToday: number;

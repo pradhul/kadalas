@@ -1,6 +1,6 @@
 # Kadalas
 
-**v0.1.0 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
+**v0.1.1 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
 
 There is **no app-owned backend or database**:
 
@@ -22,7 +22,7 @@ By default the app runs in **mock mode** so you can exercise every screen withou
 - **Entity-aware grouping** — group by registration / chassis / …; keep latest (or per coverage slot); older versions → history; ambiguous subjects flagged in review
 - **Vehicle OD/TP coverage slots** — package vs Standalone OD vs Liability Only / Act Only; long-term TP + annual OD; vehicle cover view
 - **Browse / search / expiring** — folders, vehicles list, metadata search, per-slot expiry gaps
-- **Settings** — paste Gemini (or other) API key; usage / queue / 429 backoff
+- **Settings** — free-tier key helpers (Gemini / OpenRouter / Groq), paid OpenAI & Anthropic, **Test key**, mobile-friendly paste field
 
 | Scan progress | Quota pause | Grouped review |
 | --- | --- | --- |
@@ -54,6 +54,52 @@ cp .env.example .env
 ```
 
 Set `EXPO_PUBLIC_USE_MOCKS=false` and fill OAuth client IDs when you want real Google APIs. Paste AI keys in **Settings** (never commit them).
+
+---
+
+## Web production build
+
+`EXPO_PUBLIC_USE_MOCKS` and `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` are read at **build time** (embedded in the JS bundle). Set them in the environment before exporting:
+
+```bash
+EXPO_PUBLIC_USE_MOCKS=false \
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com \
+npm run build:web
+```
+
+This runs `expo export --platform web` and writes a static site to **`dist/`**, including `dist/_redirects` for SPA fallback on Netlify:
+
+```
+/*    /index.html   200
+```
+
+Serve `dist/` from any static host. On a phone, the layout is responsive (narrow padding, wrapping Settings actions, full-width sign-in).
+
+### Google OAuth redirect (any deploy origin)
+
+On web, the OAuth redirect URI is always **`window.location.origin`** (no hardcoded host). For every place you deploy (preview, production, custom domain):
+
+1. Google Cloud Console → Credentials → your **Web** OAuth client
+2. **Authorized JavaScript origins** → add `https://your-deployed-host`
+3. **Authorized redirect URIs** → add the same origin (`https://your-deployed-host`)
+
+Local web: add `http://localhost:43123` (or whatever port you use).
+
+When the build is in real mode (`EXPO_PUBLIC_USE_MOCKS=false`), the sign-in screen also offers **Try demo data** so you can explore the seeded vault without connecting Google.
+
+---
+
+## AI keys (Settings)
+
+| Provider | Tier | Get a key |
+| -------- | ---- | --------- |
+| Google AI Studio (Gemini) | Free (recommended default) | https://aistudio.google.com/apikey |
+| OpenRouter | Free models (`:free`) | https://openrouter.ai/keys |
+| Groq | Free tier (OpenAI-compatible) | https://console.groq.com/keys |
+| OpenAI | Paid | https://platform.openai.com/api-keys |
+| Anthropic | Paid | https://console.anthropic.com/settings/keys |
+
+OpenRouter defaults to a free model (`…:free`). Groq uses `https://api.groq.com/openai/v1`. Use **Test key** after pasting to verify with one tiny classify request. The key field disables autocorrect/autocapitalize and has a Show/Hide toggle for mobile web paste.
 
 ---
 
@@ -113,7 +159,8 @@ The Drive root folder is **Kadalas**. If an older **Document Vault** folder alre
 2. Configure OAuth consent (Testing + test users first)
 3. Create OAuth client IDs (Web / iOS / Android) — use PKCE; **no client secret in the app**
 4. Put public client IDs in `.env` (see `.env.example`)
-5. Optional: create a [Gemini API key](https://aistudio.google.com/apikey) and paste it in Settings
+5. For **web**, authorize each deploy **origin** as JS origin + redirect URI (see above)
+6. Optional: create a [Gemini API key](https://aistudio.google.com/apikey) and paste it in Settings
 
 Bundle ID / package: `com.pradhul.kadalas`. URL scheme: `kadalas://`.
 
@@ -129,7 +176,8 @@ Bundle ID / package: `com.pradhul.kadalas`. URL scheme: `kadalas://`.
 | `npm start` | Expo dev tools |
 | `npm test` | Jest unit tests |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run web:export` | Static web export to `dist/` |
+| `npm run build:web` | Static web export to `dist/` + SPA `_redirects` |
+| `npm run web:export` | Expo export only (no `_redirects` helper) |
 
 ---
 

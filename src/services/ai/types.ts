@@ -64,6 +64,8 @@ export interface AiService {
   classifyDocument(input: AiFileInput): Promise<ClassificationResult>;
   confirmVersion(input: VersionConfirmInput): Promise<VersionConfirmResult>;
   triageBatch(items: TriageItemInput[]): Promise<TriageItemResult[]>;
+  /** Tiny live request to verify the saved API key for the current provider. */
+  testKey(): Promise<{ ok: boolean; message: string }>;
   getUsage(): AiUsageStats;
   subscribeUsage(listener: (stats: AiUsageStats) => void): () => void;
   /** Test hook — force next N AI calls to fail with 429 */

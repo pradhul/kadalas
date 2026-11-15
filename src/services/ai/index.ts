@@ -2,6 +2,12 @@ import { RequestQueue } from '../../lib/rateLimit';
 import { AiProviderId, AiUsageStats } from '../../types/document';
 import { useMocks } from '../config';
 import { getAiApiKey, getPreferredProvider, savePreferredProvider } from '../secureStorage';
+import {
+  AI_PROVIDER_OPTIONS,
+  GROQ_BASE_URL,
+  GROQ_DEFAULT_MODEL,
+  OPENROUTER_DEFAULT_MODEL,
+} from './catalog';
 import { createGeminiProvider } from './gemini';
 import { createMockAiProvider } from './mockAi';
 import { createOpenAiCompatibleProvider } from './openaiCompatible';
@@ -9,6 +15,13 @@ import { AiProvider, AiService, TriageItemInput } from './types';
 import { MOCK_QUOTA_EVERY_N_AI_CALLS } from '../../mocks/mailbox';
 
 export * from './types';
+export {
+  AI_PROVIDER_OPTIONS,
+  GROQ_BASE_URL,
+  GROQ_DEFAULT_MODEL,
+  OPENROUTER_DEFAULT_MODEL,
+} from './catalog';
+export type { AiProviderOption, AiProviderTier } from './catalog';
 
 function buildProviders(): Record<AiProviderId, AiProvider> {
   return {
@@ -34,8 +47,16 @@ function buildProviders(): Record<AiProviderId, AiProvider> {
       id: 'openrouter',
       displayName: 'OpenRouter',
       baseUrl: 'https://openrouter.ai/api/v1',
-      model: 'google/gemini-2.0-flash-001',
+      model: OPENROUTER_DEFAULT_MODEL,
       getApiKey: () => getAiApiKey('openrouter'),
+      style: 'openai',
+    }),
+    groq: createOpenAiCompatibleProvider({
+      id: 'groq',
+      displayName: 'Groq',
+      baseUrl: GROQ_BASE_URL,
+      model: GROQ_DEFAULT_MODEL,
+      getApiKey: () => getAiApiKey('groq'),
       style: 'openai',
     }),
   };
@@ -113,7 +134,7 @@ export function createAiService(): AiService {
     async hasApiKey() {
       if (providerId === 'mock') return true;
       const key = await getAiApiKey(providerId);
-      return Boolean(key);
+      return Boolean(key && key.trim().length > 8);
     },
 
     classifyDocument(input) {
@@ -134,6 +155,40 @@ export function createAiService(): AiService {
         const mock = providers.mock;
         return mock.triageBatch!(items);
       });
+    },
+
+    async testKey() {
+      if (providerId === 'mock') {
+        return { ok: true, message: 'Offline heuristics — no key required.' };
+      }
+      const key = await getAiApiKey(providerId);
+      if (!key || key.trim().length < 8) {
+        return { ok: false, message: 'No API key saved for this provider.' };
+      }
+      try {
+        const provider = providers[providerId] || providers.mock;
+        // Bypass the quota mock so Settings "Test key" still works in demo builds.
+        const previousQuota = mockQuotaFailAfter;
+        mockQuotaFailAfter = null;
+        try {
+          const result = await run(() =>
+            provider.classifyDocument({
+              fileName: 'kadalas-key-test.txt',
+              mimeType: 'text/plain',
+              textExcerpt: 'Kadalas settings key test. Short insurance renewal notice.',
+              subject: 'Key test',
+              from: 'settings@kadalas.local',
+            }),
+          );
+          const title = result.title || result.category || 'ok';
+          return { ok: true, message: `Key works — sample reply: “${title}”` };
+        } finally {
+          mockQuotaFailAfter = previousQuota;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, message: msg };
+      }
     },
 
     getUsage() {
@@ -172,11 +227,3 @@ export function getAiService(): AiService {
 export function resetAiService(): void {
   singleton = null;
 }
-
-export const AI_PROVIDER_OPTIONS: Array<{ id: AiProviderId; label: string; hint: string }> = [
-  { id: 'gemini', label: 'Google AI Studio (Gemini)', hint: 'Default — accepts PDFs/images directly' },
-  { id: 'openai', label: 'OpenAI', hint: 'Paste an OpenAI API key' },
-  { id: 'anthropic', label: 'Anthropic', hint: 'Paste an Anthropic API key' },
-  { id: 'openrouter', label: 'OpenRouter', hint: 'One key for many models' },
-  { id: 'mock', label: 'Mock / offline', hint: 'Rule-based, no network AI calls' },
-];
