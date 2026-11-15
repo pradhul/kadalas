@@ -1,12 +1,12 @@
 {
-  "name": "document-vault",
+  "name": "kadalas",
   "version": "0.1.0",
-  "description": "Personal document vault (Expo) — Gmail scan, Google Drive storage, BYOK AI",
+  "description": "Kadalas — personal papers vault (Expo): Gmail scan, Google Drive storage, BYOK AI",
   "license": "MIT",
   "author": "Pradhul",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pradhul/document-vault.git"
+    "url": "https://github.com/pradhul/kadalas.git"
   },
   "main": "expo-router/entry",
   "dependencies": {

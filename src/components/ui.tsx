@@ -20,7 +20,7 @@ export function BrandMark({ large }: { large?: boolean }) {
   return (
     <View style={styles.brandRow}>
       <View style={[styles.brandMark, large && styles.brandMarkLarge]} />
-      <Text style={[styles.brandText, large && styles.brandTextLarge]}>Document Vault</Text>
+      <Text style={[styles.brandText, large && styles.brandTextLarge]}>Kadalas</Text>
     </View>
   );
 }

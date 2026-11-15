@@ -160,7 +160,7 @@ export default function AddDocumentScreen() {
             />
 
             <Button
-              title="Save to Drive vault"
+              title="Save to Kadalas"
               loading={busy}
               onPress={async () => {
                 if (!classification || !contentBase64) return;

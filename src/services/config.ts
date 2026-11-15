@@ -37,7 +37,7 @@ export function getGoogleOAuthConfig() {
  * - gmail.readonly: required to search mail and read PDF/image attachments for scan/sync.
  *   This is a Google "restricted" scope; public distribution requires verification.
  * - drive.file: preferred — the app only sees Drive files/folders it creates
- *   (Document Vault + uploads). Sufficient for vault storage + index JSON.
+ *   (Kadalas Drive folder + uploads). Sufficient for vault storage + index JSON.
  *   We do NOT request full drive or drive.readonly.
  */
 export const GOOGLE_SCOPES = [

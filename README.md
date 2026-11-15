@@ -1,16 +1,16 @@
-# Document Vault
+# Kadalas
 
-**v0.1.0 (pre-release)** — a self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
+**v0.1.0 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
 
 There is **no app-owned backend or database**:
 
-- Files live in **your Google Drive** (`drive.file` — only files this app creates)
+- Files live in **your Google Drive** folder named **Kadalas** (`drive.file` — only files this app creates)
 - Email scanning uses **Gmail** (`gmail.readonly`)
 - AI uses a **bring-your-own key** (Gemini by default). Keys stay on-device
 
 By default the app runs in **mock mode** so you can exercise every screen without Google or AI credentials.
 
-![Vault home](docs/screenshots/screenshot-vault.png)
+![Kadalas home](docs/screenshots/screenshot-vault.png)
 
 ---
 
@@ -94,7 +94,7 @@ A vault can hold several *current* docs per vehicle (e.g. 5-year TP + annual OD)
 | Module | Role |
 |--------|------|
 | `src/services/auth` | Google OAuth (+ mock), token refresh |
-| `src/services/drive` | Vault folders, uploads, `vault-index.json`, `scan-state.json` |
+| `src/services/drive` | `Kadalas/` folders, uploads, `vault-index.json`, `scan-state.json` |
 | `src/services/gmail` | Attachment search + download |
 | `src/services/ai` | Pluggable providers + request queue / rate limits |
 | `src/services/scanEngine` | Resumable staged mailbox scan |
@@ -102,6 +102,8 @@ A vault can hold several *current* docs per vehicle (e.g. 5-year TP + annual OD)
 | `src/app/*` | Expo Router screens |
 
 **Scopes:** `drive.file` + `gmail.readonly` (restricted). We do **not** request full Drive access.
+
+The Drive root folder is **Kadalas**. If an older **Document Vault** folder already exists, the app reuses it.
 
 ---
 
@@ -112,6 +114,8 @@ A vault can hold several *current* docs per vehicle (e.g. 5-year TP + annual OD)
 3. Create OAuth client IDs (Web / iOS / Android) — use PKCE; **no client secret in the app**
 4. Put public client IDs in `.env` (see `.env.example`)
 5. Optional: create a [Gemini API key](https://aistudio.google.com/apikey) and paste it in Settings
+
+Bundle ID / package: `com.pradhul.kadalas`. URL scheme: `kadalas://`.
 
 `gmail.readonly` requires Google verification before production for arbitrary users. See [restricted scope verification](https://support.google.com/cloud/answer/9110914).
 
@@ -143,4 +147,4 @@ A vault can hold several *current* docs per vehicle (e.g. 5-year TP + annual OD)
 
 [MIT](LICENSE) © 2026 Pradhul
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+See [CHANGELOG.md](CHANGELOG.md) for release history. Planned public GitHub repo: [pradhul/kadalas](https://github.com/pradhul/kadalas).

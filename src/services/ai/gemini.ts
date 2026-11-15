@@ -32,7 +32,7 @@ export function createGeminiProvider(getApiKey: () => Promise<string | null>): A
         });
       }
 
-      const prompt = `You are a personal document vault classifier.
+      const prompt = `You are a classifier for Kadalas, a personal papers vault.
 Return ONLY JSON with keys:
 category (one of: Insurance/Vehicle, Insurance/Health, Insurance/Home, Insurance/Life, Banking, Tax, Identity, Bills, Warranties, Travel, Other),
 title (clean short title),
@@ -83,7 +83,7 @@ Skip promos/newsletters (isImportantDocument=false).`;
       const key = await getApiKey();
       if (!key) return ruleTriage(items);
 
-      const prompt = `You triage email attachments for a personal document vault.
+      const prompt = `You triage email attachments for Kadalas, a personal papers vault.
 For each item, decide if it is likely an important personal document (policy, statement, tax, ID, bill, warranty, travel itinerary) vs promo/newsletter/noise.
 Return ONLY JSON: { "results": [ { "id": "...", "isLikelyImportant": true/false, "confidence": 0-1, "reason": "short" } ] }
 Items:\n${JSON.stringify(

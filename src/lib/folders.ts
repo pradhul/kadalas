@@ -6,7 +6,7 @@ export interface FolderNode {
   children: FolderNode[];
 }
 
-/** Build a tree of category folders under Document Vault. */
+/** Build a tree of category folders under the Kadalas Drive root. */
 export function buildFolderTree(): FolderNode {
   const root: FolderNode = { name: VAULT_ROOT_FOLDER, path: '', children: [] };
   const byPath = new Map<string, FolderNode>([['', root]]);

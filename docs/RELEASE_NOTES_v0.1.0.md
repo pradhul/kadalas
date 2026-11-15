@@ -1,10 +1,10 @@
-# Document Vault v0.1.0 (pre-release)
+# Kadalas v0.1.0 (pre-release)
 
-First public pre-release of **Document Vault** — an Expo (iOS / Android / web) personal document vault with no app-owned backend.
+First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/documents) — an Expo (iOS / Android / web) personal document vault with no app-owned backend.
 
 ## Highlights
 
-- Google Drive vault (`drive.file`) + Gmail scan (`gmail.readonly`) + bring-your-own AI key
+- Google Drive vault folder **Kadalas** (`drive.file`) + Gmail scan (`gmail.readonly`) + bring-your-own AI key
 - **Mock mode by default** — try the full UI without credentials
 - Resumable full-mailbox scan: search → rules → batched metadata triage → classify → entity grouping
 - Scan state persisted to Drive; quota pause/resume; incremental review
@@ -22,8 +22,8 @@ First public pre-release of **Document Vault** — an Expo (iOS / Android / web)
 ## Install
 
 ```bash
-git clone https://github.com/pradhul/document-vault.git
-cd document-vault
+git clone https://github.com/pradhul/kadalas.git
+cd kadalas
 npm install
 npm run web
 ```

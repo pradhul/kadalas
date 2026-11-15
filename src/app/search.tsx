@@ -23,7 +23,7 @@ export default function SearchScreen() {
           query ? (
             <EmptyState title="No matches" body="Try another issuer, reference number, or keyword." />
           ) : (
-            <EmptyState title="Search the vault" body="Matches titles and metadata across all folders." />
+            <EmptyState title="Search Kadalas" body="Matches titles and metadata across all folders." />
           )
         }
         renderItem={({ item }) => (

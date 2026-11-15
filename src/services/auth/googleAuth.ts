@@ -104,7 +104,7 @@ export function createGoogleAuthService(): AuthService {
       }
 
       const redirectUri = ExpoAuthSession.makeRedirectUri({
-        scheme: 'documentvault',
+        scheme: 'kadalas',
       });
 
       const request = new ExpoAuthSession.AuthRequest({

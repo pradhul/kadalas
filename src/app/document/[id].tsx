@@ -79,7 +79,7 @@ export default function DocumentDetailScreen() {
               },
               updatedAt: new Date().toISOString(),
             });
-            setStatus('Saved to vault index');
+            setStatus('Saved to Kadalas index');
           }}
         />
 

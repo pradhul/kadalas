@@ -27,7 +27,7 @@ await waitForText(page, 'Continue with mock Google');
 await shot(page, 'screenshot-signin.png');
 
 await page.getByText('Continue with mock Google').click();
-await waitForText(page, "Pradhul's vault", 30000);
+await waitForText(page, "Pradhul's Kadalas", 30000);
 await page.waitForTimeout(800);
 await shot(page, 'screenshot-vault.png');
 

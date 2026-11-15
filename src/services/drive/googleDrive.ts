@@ -1,5 +1,6 @@
 import {
   INDEX_FILENAME,
+  LEGACY_VAULT_ROOT_FOLDER,
   VAULT_CATEGORIES,
   VAULT_ROOT_FOLDER,
   VERSIONS_FOLDER,
@@ -70,9 +71,18 @@ export function createGoogleDriveService(): DriveService {
   let cache: { vaultFolderId: string; folderIdsByPath: Record<string, string>; indexFileId?: string } | null =
     null;
 
+  async function ensureRootFolder(): Promise<string> {
+    // Prefer existing "Kadalas"; fall back to legacy "Document Vault" for upgrades
+    const modern = await findFolder(VAULT_ROOT_FOLDER);
+    if (modern) return modern;
+    const legacy = await findFolder(LEGACY_VAULT_ROOT_FOLDER);
+    if (legacy) return legacy;
+    return createFolder(VAULT_ROOT_FOLDER);
+  }
+
   async function ensureStructure() {
     if (cache) return cache;
-    const vaultFolderId = await ensureFolder(VAULT_ROOT_FOLDER);
+    const vaultFolderId = await ensureRootFolder();
     const folderIdsByPath: Record<string, string> = { '': vaultFolderId };
 
     for (const category of VAULT_CATEGORIES) {

@@ -57,7 +57,7 @@ export default function VaultHomeScreen() {
             </View>
           </View>
           <Text style={styles.welcome}>
-            {session?.user.name ? `${session.user.name}'s vault` : 'Your vault'}
+            {session?.user.name ? `${session.user.name}'s Kadalas` : 'Your Kadalas'}
           </Text>
           <Text style={styles.meta}>
             {documents.length} documents
@@ -70,8 +70,8 @@ export default function VaultHomeScreen() {
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.teal} />
         ) : !documents.length ? (
           <EmptyState
-            title="Vault is empty"
-            body="Add a PDF or scan Gmail to start filing documents into your Drive folders."
+            title="Kadalas is empty"
+            body="Add a PDF or scan Gmail to start filing papers into your Drive folders."
           />
         ) : (
           <FlatList

@@ -26,7 +26,10 @@ export const VAULT_CATEGORIES: VaultCategory[] = [
   'Other',
 ];
 
-export const VAULT_ROOT_FOLDER = 'Document Vault';
+/** Drive root folder created by the app (Malayalam for papers/documents). */
+export const VAULT_ROOT_FOLDER = 'Kadalas';
+/** Legacy name — still detected so existing Drive vaults keep working. */
+export const LEGACY_VAULT_ROOT_FOLDER = 'Document Vault';
 export const VERSIONS_FOLDER = '_versions';
 export const INDEX_FILENAME = 'vault-index.json';
 

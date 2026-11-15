@@ -7,13 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] - 2026-11-15
 
-First public pre-release.
+First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/documents).
 
 ### Added
 
-- Expo (React Native + TypeScript + Expo Router) Document Vault for iOS, Android, and web
+- Expo (React Native + TypeScript + Expo Router) app for iOS, Android, and web
 - Google OAuth with `gmail.readonly` + `drive.file` (mock mode by default — no credentials required to try the UI)
-- Drive-backed vault folders, `vault-index.json`, and `_versions` history
+- Drive-backed **Kadalas** folder tree, `vault-index.json`, and `_versions` history (reuses a legacy `Document Vault` folder if present)
 - Bring-your-own AI key (Gemini default; OpenAI / Anthropic / OpenRouter pluggable)
 - Resumable full-mailbox Gmail scan: search → rule filter → batched metadata triage → classify → entity grouping
 - Scan state persistence (Drive `scan-state.json` + local cache), quota pause/resume, progress UI, incremental review
@@ -30,4 +30,4 @@ First public pre-release.
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
-[0.1.0]: https://github.com/pradhul/document-vault/releases/tag/v0.1.0
+[0.1.0]: https://github.com/pradhul/kadalas/releases/tag/v0.1.0

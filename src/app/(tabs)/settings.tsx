@@ -146,7 +146,7 @@ export default function SettingsScreen() {
             <Text style={styles.label}>Scopes & privacy</Text>
             <Text style={styles.meta}>
               gmail.readonly (restricted — Google verification required before public OAuth). drive.file (app-created
-              files only). No app backend; vault index lives in your Drive.
+              files only). No app backend; the Kadalas index lives in your Drive.
             </Text>
           </View>
         </ScrollView>
