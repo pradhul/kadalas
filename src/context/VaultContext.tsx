@@ -20,6 +20,7 @@ interface VaultContextValue {
   updateDocument: (doc: VaultDocument) => Promise<void>;
   scanProgress: { message: string; current: number; total: number } | null;
   lastScanCandidates: ScanCandidate[];
+  seedScanCandidates?: (candidates: ScanCandidate[]) => void;
   runScan: (lookbackDays?: number) => Promise<ScanCandidate[]>;
   approveCandidates: (ids: string[]) => Promise<void>;
   rejectCandidate: (id: string) => void;
@@ -122,6 +123,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const seedScanCandidates = useCallback((candidates: ScanCandidate[]) => {
+    setLastScanCandidates(candidates);
+  }, []);
+
   const syncDocument = useCallback(
     async (docId: string) => {
       const doc = index?.documents.find((d) => d.id === docId);
@@ -188,6 +193,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       updateDocument,
       scanProgress,
       lastScanCandidates,
+      seedScanCandidates,
       runScan,
       approveCandidates,
       rejectCandidate,
@@ -204,6 +210,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       updateDocument,
       scanProgress,
       lastScanCandidates,
+      seedScanCandidates,
       runScan,
       approveCandidates,
       rejectCandidate,

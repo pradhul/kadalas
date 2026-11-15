@@ -1,12 +1,20 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Banner, Button, Chip, EmptyState, Screen } from '../components/ui';
 import { colors, radii, spacing, typography } from '../constants/theme';
 import { useVault } from '../context/VaultContext';
+import { MOCK_SCAN_CANDIDATES } from '../mocks/data';
+import { useMocks } from '../services/config';
 
 export default function ScanReviewScreen() {
-  const { lastScanCandidates, approveCandidates, rejectCandidate } = useVault();
+  const { lastScanCandidates, approveCandidates, rejectCandidate, seedScanCandidates } = useVault();
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (useMocks() && lastScanCandidates.length === 0 && seedScanCandidates) {
+      seedScanCandidates(MOCK_SCAN_CANDIDATES);
+    }
+  }, [lastScanCandidates.length, seedScanCandidates]);
 
   const pending = useMemo(
     () => lastScanCandidates.filter((c) => c.status === 'pending'),
