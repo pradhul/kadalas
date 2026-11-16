@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Linking,
   StyleSheet,
   Text,
   View,
@@ -14,6 +15,7 @@ import { DriveSafetyNote } from '../components/DriveSafetyNote';
 import { Banner, Button, Screen, SectionTitle } from '../components/ui';
 import { colors, radii, spacing, typography } from '../constants/theme';
 import { useVault } from '../context/VaultContext';
+import { destinationFolderPath } from '../lib/approveFlow';
 import { formatCoverageType } from '../lib/coverageSlots';
 import { buildGroupedReview, groupCandidatesBySubject } from '../lib/grouping';
 import {
@@ -26,7 +28,7 @@ import type { ScanCandidate } from '../types/document';
 
 type ToastState =
   | { kind: 'skip'; id: string; fileName: string }
-  | { kind: 'approve'; id: string; message: string }
+  | { kind: 'approve'; id: string; message: string; webViewLink?: string }
   | null;
 
 export default function ScanReviewScreen() {
@@ -103,7 +105,7 @@ export default function ScanReviewScreen() {
 
   async function handleApprove(c: ScanCandidate) {
     const selected = selectedKeys[c.id];
-    const results = await approveCandidates(
+    const { saved, failed } = await approveCandidates(
       [c.id],
       selected ? { [c.id]: selected } : undefined,
     );
@@ -112,12 +114,20 @@ export default function ScanReviewScreen() {
       delete next[c.id];
       return next;
     });
-    const path = results[0]?.folderPath ?? `Kadalas/${c.classification?.category ?? 'Other'}`;
-    showToast({
-      kind: 'approve',
-      id: c.id,
-      message: `Saved to your Google Drive › ${path}`,
-    });
+
+    if (saved.length) {
+      const ok = saved[0];
+      showToast({
+        kind: 'approve',
+        id: c.id,
+        message: `Saved to your Google Drive › ${ok.folderPath}`,
+        webViewLink: ok.webViewLink,
+      });
+    }
+    if (failed.length && !saved.length) {
+      // Card shows saveError; also surface at top
+      setError(`Couldn't save to Drive: ${failed[0].reason}`);
+    }
   }
 
   async function handleSkip(c: ScanCandidate) {
@@ -144,6 +154,10 @@ export default function ScanReviewScreen() {
             title="Review scan results"
             subtitle={`${reviewStats.toReview} to review · ${reviewStats.approved} approved · ${reviewStats.skipped} skipped`}
           />
+          <Banner>
+            Approve copies the attachment into your Google Drive › Kadalas folder (by category) and
+            adds it to your vault. Skip ignores it and will not suggest it again.
+          </Banner>
           <DriveSafetyNote
             vaultFolderUrl={vaultFolderUrl}
             lastSyncedAt={lastSyncedAt}
@@ -232,7 +246,17 @@ export default function ScanReviewScreen() {
                 </Pressable>
               </View>
             ) : (
-              <Text style={styles.toastText}>{toast.message}</Text>
+              <View style={styles.toastRow}>
+                <Text style={styles.toastText}>{toast.message}</Text>
+                {toast.webViewLink ? (
+                  <Pressable
+                    onPress={() => void Linking.openURL(toast.webViewLink!)}
+                    testID="open-drive-file"
+                  >
+                    <Text style={styles.toastAction}>Open in Drive</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             )}
           </Animated.View>
         ) : null}
@@ -267,6 +291,7 @@ function CandidateCard({
   const showCover = isVehicleReviewFamily(c.classification?.category, m.documentType);
   const possibleKeys =
     showCover && c.possibleSubjectKeys?.length ? c.possibleSubjectKeys : undefined;
+  const dest = destinationFolderPath(c.classification?.category);
 
   const subjectDisplay =
     m.subjectLabel && !String(m.subjectLabel).includes(':')
@@ -299,6 +324,7 @@ function CandidateCard({
         {c.classification?.category ?? 'Unclassified'} · {m.issuer ?? 'Unknown issuer'}
         {showCover ? ` · ${formatCoverageType(m.coverageType)}` : ''}
       </Text>
+      {!done ? <Text style={styles.dest}>Will save to: {dest}</Text> : null}
       {subjectDisplay ? (
         <Text style={styles.meta}>
           Subject: {subjectDisplay}
@@ -311,6 +337,12 @@ function CandidateCard({
         <Text style={styles.hint}>
           Older version — will move to _versions when the current policy is approved
         </Text>
+      ) : null}
+
+      {c.saveError ? (
+        <View style={styles.errorBox} testID={`save-error-${c.id}`}>
+          <Text style={styles.errorText}>Couldn&apos;t save to Drive: {c.saveError}</Text>
+        </View>
       ) : null}
 
       {!done && possibleKeys?.length && c.isGroupLatest !== false ? (
@@ -339,11 +371,22 @@ function CandidateCard({
 
       {!done && c.isGroupLatest !== false ? (
         <View style={styles.actions}>
-          <Button title="Approve" loading={busy} onPress={onApprove} />
+          <Button
+            title={c.saveError ? 'Retry Approve' : 'Approve'}
+            loading={busy}
+            onPress={onApprove}
+          />
           <Button title="Skip" variant="ghost" disabled={busy} onPress={onReject} />
         </View>
       ) : approved ? (
-        <Text style={[styles.status, styles.statusApproved]}>Approved · saved to Drive</Text>
+        <View style={{ gap: 4 }}>
+          <Text style={[styles.status, styles.statusApproved]}>Approved · saved to Drive</Text>
+          {c.driveWebViewLink ? (
+            <Pressable onPress={() => void Linking.openURL(c.driveWebViewLink!)}>
+              <Text style={styles.link}>Open in Drive →</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : done ? (
         <Text style={styles.status}>{c.status}</Text>
       ) : null}
@@ -373,7 +416,16 @@ const styles = StyleSheet.create({
   },
   groupTitle: { ...typography.h3, color: colors.ink },
   meta: { ...typography.caption, color: colors.inkMuted },
+  dest: { ...typography.caption, color: colors.teal, fontWeight: '600' },
   hint: { ...typography.caption, color: colors.teal, marginTop: 2 },
+  link: { ...typography.caption, color: colors.teal, fontWeight: '600' },
+  errorBox: {
+    backgroundColor: colors.roseSoft,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginTop: 4,
+  },
+  errorText: { ...typography.caption, color: colors.rose },
   card: {
     borderTopWidth: 1,
     borderTopColor: colors.line,

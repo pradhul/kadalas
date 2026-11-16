@@ -62,8 +62,16 @@ export class ScanEngine {
     this.listeners.forEach((l) => l(state));
   }
 
+  /** Public debug log for approve/skip failures (scan debug card). */
+  logEvent(message: string): void {
+    this.note(message);
+  }
+
   private note(message: string, api?: { label: string; status: string }) {
-    if (!this.state) return;
+    if (!this.state) {
+      // No active job — still allow a one-off event by creating a transient log on null state
+      return;
+    }
     let next = appendScanEvent(this.state, message);
     next = {
       ...next,

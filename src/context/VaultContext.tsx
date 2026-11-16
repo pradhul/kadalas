@@ -31,14 +31,16 @@ import {
 } from '../services/vaultOps';
 import { clearScanJobState, getScanEngine } from '../services/scanEngine';
 import { loadReviewState, saveReviewState } from '../services/reviewPersist';
+import {
+  ApproveSuccess,
+  reclaimFalseApprovals,
+  runApproveFlow,
+} from '../lib/approveFlow';
 import { rekeyDemoVehicleSubjects } from '../lib/rekeyDemoSubjects';
 import { useAuth } from './AuthContext';
 import { useMocks } from '../services/config';
 
-export type ApproveResult = {
-  folderPath: string;
-  fileName: string;
-};
+export type ApproveResult = ApproveSuccess;
 
 interface VaultContextValue {
   index: VaultIndex | null;
@@ -70,7 +72,7 @@ interface VaultContextValue {
   approveCandidates: (
     ids: string[],
     subjectOverrides?: Record<string, string>,
-  ) => Promise<ApproveResult[]>;
+  ) => Promise<{ saved: ApproveResult[]; failed: Array<{ candidateId: string; reason: string }> }>;
   rejectCandidate: (id: string) => Promise<void>;
   /** Restore a skipped item back to pending and remove from skipped-id set. */
   restoreSkippedCandidate: (id: string) => Promise<void>;
@@ -197,11 +199,23 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       if (review.lastSyncedAt) setLastSyncedAt(review.lastSyncedAt);
       getScanEngine().setSkippedAttachmentIds(review.skippedIds);
 
-      // Restore review queue when scan-state is empty / older
+      // Restore review queue; roll back false approvals with no vault Drive file
       if (review.candidates.length) {
+        const reclaimed = reclaimFalseApprovals(review.candidates, next.documents);
         setLastScanCandidates((prev) =>
-          prev.length ? mergeReviewCandidates(prev, review) : review.candidates,
+          prev.length
+            ? mergeReviewCandidates(prev, { ...review, candidates: reclaimed.candidates })
+            : reclaimed.candidates,
         );
+        if (reclaimed.reclaimedIds.length) {
+          getScanEngine().logEvent(
+            `Reclaimed ${reclaimed.reclaimedIds.length} false approval(s) → pending (no Drive file)`,
+          );
+          review.candidates = reclaimed.candidates;
+          reviewRef.current = review;
+          setReviewState(review);
+          await saveReviewState(review);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -224,16 +238,25 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       engine.setSkippedAttachmentIds(review.skippedIds);
 
       const s = await engine.hydrate();
+      const vaultDocs = (await getDriveService().loadIndex().catch(() => null))?.documents ?? [];
       if (s) {
         setScanJob(s);
-        const merged = mergeReviewCandidates(s.candidates, review);
+        let merged = mergeReviewCandidates(s.candidates, review);
+        const reclaimed = reclaimFalseApprovals(merged, vaultDocs);
+        merged = reclaimed.candidates;
         setLastScanCandidates(merged);
-        // Prefer richer merged queue if review had decisions
-        if (review.candidates.length || review.skippedIds.length) {
+        if (review.candidates.length || review.skippedIds.length || reclaimed.reclaimedIds.length) {
           void persistReview({ candidates: merged, skippedIds: review.skippedIds });
         }
       } else if (review.candidates.length) {
-        setLastScanCandidates(review.candidates);
+        const reclaimed = reclaimFalseApprovals(review.candidates, vaultDocs);
+        setLastScanCandidates(reclaimed.candidates);
+        if (reclaimed.reclaimedIds.length) {
+          void persistReview({
+            candidates: reclaimed.candidates,
+            skippedIds: review.skippedIds,
+          });
+        }
       }
       setScanEngineRunning(engine.isRunning());
     })();
@@ -334,54 +357,42 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   );
 
   const approveCandidates = useCallback(
-    async (ids: string[], subjectOverrides?: Record<string, string>): Promise<ApproveResult[]> => {
-      const selected = lastScanCandidates.filter(
-        (c) =>
-          ids.includes(c.id) &&
-          (c.status === 'pending' || c.status === 'needs_subject_confirm') &&
-          c.isGroupLatest !== false,
-      );
-      const toSave = selected.length
-        ? selected
-        : lastScanCandidates.filter((c) => ids.includes(c.id) && c.status === 'pending');
+    async (
+      ids: string[],
+      subjectOverrides?: Record<string, string>,
+    ): Promise<{ saved: ApproveResult[]; failed: Array<{ candidateId: string; reason: string }> }> => {
+      const flow = await runApproveFlow({
+        ids,
+        candidates: lastScanCandidates,
+        subjectOverrides,
+        applySubjectOverride,
+        save: async (candidate) => {
+          const result = await saveCandidateToVault(candidate);
+          return {
+            category: result.category,
+            title: result.document.title,
+            driveFileId: result.driveFileId,
+            webViewLink: result.webViewLink,
+          };
+        },
+      });
 
-      const results: ApproveResult[] = [];
-      for (const raw of toSave) {
-        const overrideKey = subjectOverrides?.[raw.id];
-        const candidate = overrideKey ? applySubjectOverride(raw, overrideKey) : raw;
-        const older = lastScanCandidates.filter(
-          (c) =>
-            c.groupId &&
-            c.groupId === candidate.groupId &&
-            c.id !== candidate.id &&
-            c.status === 'duplicate',
-        );
-        const saved = await saveCandidateToVault(candidate);
-        results.push({
-          folderPath: `Kadalas/${saved.category}`,
-          fileName: saved.title || candidate.fileName,
-        });
-        for (const old of older) {
-          try {
-            await saveCandidateToVault({ ...old, status: 'pending' });
-          } catch {
-            // ignore
-          }
-        }
-      }
-
-      const nextCandidates = lastScanCandidates.map((c) =>
-        ids.includes(c.id) || (c.duplicateOfId && ids.includes(c.duplicateOfId))
-          ? { ...c, status: 'approved' as const }
-          : c,
-      );
-      setLastScanCandidates(nextCandidates);
+      setLastScanCandidates(flow.candidates);
       await persistReview({
-        candidates: nextCandidates,
+        candidates: flow.candidates,
         skippedIds: reviewRef.current.skippedIds,
       });
 
-      if (index) {
+      for (const fail of flow.failed) {
+        getScanEngine().logEvent(`Approve failed for ${fail.candidateId}: ${fail.reason}`);
+      }
+      for (const ok of flow.saved) {
+        getScanEngine().logEvent(
+          `Approved ${ok.fileName} → ${ok.folderPath} (${ok.driveFileId})`,
+        );
+      }
+
+      if (flow.saved.length && index) {
         const drive = getDriveService();
         const next = {
           ...index,
@@ -391,9 +402,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         await drive.saveIndex(next);
         setIndex(next);
         setLastSyncedAt(next.updatedAt);
+        await refresh();
       }
-      await refresh();
-      return results;
+
+      return { saved: flow.saved, failed: flow.failed };
     },
     [lastScanCandidates, index, refresh, persistReview],
   );

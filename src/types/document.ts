@@ -150,6 +150,12 @@ export interface ScanCandidate {
   possibleSubjectKeys?: string[];
   /** Human summary from entity grouping (e.g. "4 versions found, keeping 2026-27 policy") */
   groupSummary?: string;
+  /** Last Approve failure — shown on the card with Retry */
+  saveError?: string;
+  /** Drive file id after a confirmed successful Approve */
+  driveFileId?: string;
+  /** Drive webViewLink after a confirmed successful Approve */
+  driveWebViewLink?: string;
 }
 
 export interface SyncSuggestion {

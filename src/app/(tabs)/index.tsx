@@ -65,7 +65,11 @@ export default function VaultHomeScreen() {
             {isMock ? ' · mock Drive' : ' · Google Drive'}
           </Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          <DriveSafetyNote vaultFolderUrl={vaultFolderUrl} lastSyncedAt={lastSyncedAt} />
+          <DriveSafetyNote
+            vaultFolderUrl={vaultFolderUrl}
+            lastSyncedAt={lastSyncedAt}
+            documentCount={documents.length}
+          />
         </Animated.View>
 
         {loading && !documents.length ? (

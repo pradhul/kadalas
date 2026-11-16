@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-11-16
+
+### Fixed
+
+- **Approve no longer lies**: a candidate is marked approved and the success toast is shown only after Drive returns a file id. Empty selection or upload failure keeps the item pending with a visible card error + Retry; failures are logged to the scan debug log
+- Gmail attachment download failures are no longer replaced with a silent placeholder upload
+- Drive multipart upload is binary-safe (PDF/image bytes)
+- Grouping no longer resets `approved` / `rejected` statuses back to pending
+- False approvals (marked approved with no vault Drive file) are reclaimed to pending on load
+
+### Added
+
+- Review helper copy explaining Approve vs Skip; each card shows `Will save to: Kadalas/<category>`
+- Success toast includes **Open in Drive** when `webViewLink` is present
+- Home shows vault document count + **Open Kadalas folder in Drive**
+
+### Changed
+
+- Version bump to **0.1.7**
+
 ## [0.1.6] - 2026-11-16
 
 ### Fixed
@@ -134,6 +154,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.7]: https://github.com/pradhul/kadalas/releases/tag/v0.1.7
 [0.1.6]: https://github.com/pradhul/kadalas/releases/tag/v0.1.6
 [0.1.5]: https://github.com/pradhul/kadalas/releases/tag/v0.1.5
 [0.1.4]: https://github.com/pradhul/kadalas/releases/tag/v0.1.4

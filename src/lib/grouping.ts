@@ -271,7 +271,15 @@ export function groupCandidatesBySubject(
       olderVersionIds: olderIds,
       groupLabel: subjectLabel,
       groupSummary: summary,
-      status: c.status === 'skipped' || c.status === 'duplicate' ? c.status : 'pending',
+      // Preserve terminal / confirm statuses — never wipe approved/rejected back to pending
+      status:
+        c.status === 'skipped' ||
+        c.status === 'duplicate' ||
+        c.status === 'approved' ||
+        c.status === 'rejected' ||
+        c.status === 'needs_subject_confirm'
+          ? c.status
+          : 'pending',
     }));
     const olderOut: ScanCandidate[] = older.map((o) => ({
       ...o,

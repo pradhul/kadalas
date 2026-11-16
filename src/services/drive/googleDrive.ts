@@ -177,16 +177,39 @@ export function createGoogleDriveService(): DriveService {
         parents: [input.parentFolderId],
         mimeType: input.mimeType,
       };
-      const content =
-        input.contentText ??
-        (input.contentBase64 ? atobCompat(input.contentBase64) : '');
-      const form = buildMultipart(metadata, content, input.mimeType);
-      const res = await driveFetch(`${UPLOAD}/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,size`, {
-        method: 'POST',
-        headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
-        body: form.body,
-      });
-      return (await res.json()) as DriveFileRef;
+      // Binary-safe multipart: decode base64 to bytes (Gmail uses base64url → already
+      // normalized to standard base64 by googleGmail.getAttachment).
+      let boundary: string;
+      let bodyInit: BodyInit;
+      if (input.contentText != null) {
+        const form = buildMultipart(metadata, input.contentText, input.mimeType);
+        boundary = form.boundary;
+        bodyInit = form.body;
+      } else {
+        const form = buildMultipartBinary(
+          metadata,
+          input.contentBase64 ? base64ToBytes(input.contentBase64) : new Uint8Array(0),
+          input.mimeType,
+        );
+        boundary = form.boundary;
+        // Copy into a plain ArrayBuffer so BlobPart typing accepts it.
+        const copy = new ArrayBuffer(form.body.byteLength);
+        new Uint8Array(copy).set(form.body);
+        bodyInit = new Blob([copy]);
+      }
+      const res = await driveFetch(
+        `${UPLOAD}/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,size`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+          body: bodyInit,
+        },
+      );
+      const uploaded = (await res.json()) as DriveFileRef;
+      if (!uploaded?.id) {
+        throw new Error('Drive upload returned no file id');
+      }
+      return uploaded;
     },
 
     async moveFile(fileId, newParentId, oldParentId) {
@@ -329,6 +352,37 @@ function buildMultipart(
     `${content}\r\n` +
     `--${boundary}--`;
   return { boundary, body };
+}
+
+/** Binary-safe multipart body so PDF/image bytes are not corrupted by JS strings. */
+function buildMultipartBinary(
+  metadata: Record<string, unknown>,
+  bytes: Uint8Array,
+  contentType: string,
+): { boundary: string; body: Uint8Array } {
+  const boundary = `dv_boundary_${Date.now()}`;
+  const encoder = new TextEncoder();
+  const preamble = encoder.encode(
+    `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      `${JSON.stringify(metadata)}\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Type: ${contentType}\r\n\r\n`,
+  );
+  const ending = encoder.encode(`\r\n--${boundary}--`);
+  const body = new Uint8Array(preamble.length + bytes.length + ending.length);
+  body.set(preamble, 0);
+  body.set(bytes, preamble.length);
+  body.set(ending, preamble.length + bytes.length);
+  return { boundary, body };
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const normalized = b64.replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
+  const bin = atobCompat(normalized);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) & 0xff;
+  return out;
 }
 
 function atobCompat(b64: string): string {

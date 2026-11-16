@@ -222,10 +222,18 @@ export async function syncDocumentFromGmail(
   return null;
 }
 
+export type SaveCandidateResult = {
+  document: VaultDocument;
+  driveFileId: string;
+  webViewLink?: string;
+  parentFolderId: string;
+  category: VaultDocument['category'];
+};
+
 export async function saveCandidateToVault(
   candidate: ScanCandidate,
   overrides?: Partial<ClassificationResult>,
-): Promise<VaultDocument> {
+): Promise<SaveCandidateResult> {
   const drive = getDriveService();
   const gmail = getGmailService();
   const classification = {
@@ -237,22 +245,41 @@ export async function saveCandidateToVault(
     },
   };
 
-  const folderId = await drive.getFolderIdForCategory(classification.category);
-  let contentBase64 = '';
-  try {
-    const content = await gmail.getAttachment(candidate.gmailMessageId, candidate.gmailAttachmentId);
-    contentBase64 = content.dataBase64;
-  } catch {
-    contentBase64 = btoa(`placeholder:${candidate.fileName}`);
+  if (!candidate.gmailMessageId || !candidate.gmailAttachmentId) {
+    throw new Error('Missing Gmail message/attachment id — cannot download the file');
   }
 
-  const hash = candidate.contentRef || (await hashBytes(contentBase64));
+  const folderId = await drive.getFolderIdForCategory(classification.category);
+  // Never silently substitute a placeholder — a failed Gmail fetch must surface to the user.
+  const content = await gmail.getAttachment(
+    candidate.gmailMessageId,
+    candidate.gmailAttachmentId,
+    {
+      messageId: candidate.gmailMessageId,
+      attachmentId: candidate.gmailAttachmentId,
+      filename: candidate.fileName,
+      mimeType: candidate.mimeType,
+      size: candidate.sizeBytes,
+      subject: candidate.subject,
+      from: candidate.from,
+      date: candidate.date,
+      snippet: candidate.previewSnippet || '',
+    },
+  );
+  if (!content.dataBase64) {
+    throw new Error('Gmail returned an empty attachment');
+  }
+
+  const hash = candidate.contentRef || (await hashBytes(content.dataBase64));
   const uploaded = await drive.uploadFile({
     name: sanitizeFileName(classification.title || candidate.fileName),
-    mimeType: candidate.mimeType,
-    contentBase64,
+    mimeType: candidate.mimeType || content.mimeType,
+    contentBase64: content.dataBase64,
     parentFolderId: folderId,
   });
+  if (!uploaded?.id) {
+    throw new Error('Drive upload returned no file id');
+  }
 
   const doc = createInitialDocument({
     title: classification.title,
@@ -273,7 +300,13 @@ export async function saveCandidateToVault(
   });
 
   await drive.upsertDocument(doc);
-  return doc;
+  return {
+    document: doc,
+    driveFileId: uploaded.id,
+    webViewLink: uploaded.webViewLink,
+    parentFolderId: folderId,
+    category: classification.category,
+  };
 }
 
 export async function applySyncSuggestion(suggestion: SyncSuggestion): Promise<VaultDocument> {

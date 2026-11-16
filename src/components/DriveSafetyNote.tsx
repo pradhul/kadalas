@@ -16,16 +16,23 @@ export function DriveSafetyNote({
   vaultFolderUrl,
   lastSyncedAt,
   compact,
+  documentCount,
 }: {
   vaultFolderUrl: string | null;
   lastSyncedAt: string | null;
   compact?: boolean;
+  documentCount?: number;
 }) {
   return (
     <View style={[styles.box, compact && styles.boxCompact]} testID="drive-safety-note">
       <Text style={styles.text}>
         Everything you approve is saved in your Google Drive (Kadalas folder). Closing the app is safe.
       </Text>
+      {typeof documentCount === 'number' ? (
+        <Text style={styles.meta} testID="vault-doc-count">
+          {documentCount} document{documentCount === 1 ? '' : 's'} in your vault
+        </Text>
+      ) : null}
       <Text style={styles.meta}>{formatSyncedAt(lastSyncedAt)}</Text>
       {vaultFolderUrl ? (
         <Pressable
@@ -33,7 +40,7 @@ export function DriveSafetyNote({
           accessibilityRole="link"
           testID="open-drive-folder"
         >
-          <Text style={styles.link}>Open Kadalas in Google Drive →</Text>
+          <Text style={styles.link}>Open Kadalas folder in Drive →</Text>
         </Pressable>
       ) : (
         <Text style={styles.meta}>Demo mode keeps files in this browser only.</Text>
