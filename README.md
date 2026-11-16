@@ -1,6 +1,6 @@
 # Kadalas
 
-**v0.1.9 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
+**v0.1.10 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
 
 There is **no app-owned backend or database**:
 
@@ -21,6 +21,7 @@ By default the app runs in **mock mode** so you can exercise every screen withou
 - **Full resumable Gmail scan** — all-time first run; staged pipeline (search → rules → batched metadata AI triage → classify → entity grouping); Drive-persisted scan state; quota pause/resume; incremental review
 - **Entity-aware grouping** — group by registration / chassis / …; keep latest (or per coverage slot); older versions → history; ambiguous subjects flagged in review
 - **Vehicle OD/TP coverage slots** — package vs Standalone OD vs Liability Only / Act Only; long-term TP + annual OD; vehicle cover view
+- **My documents (Home)** — lists every approved entry from `vault-index.json` (Gmail pointer, Drive copy, or on-device), grouped by category with search + filter chips; dashboard counts for documents / to review / expiring
 - **Browse / search / expiring** — folders, vehicles list, metadata search, per-slot expiry gaps
 - **Settings** — free-tier key helpers (Gemini / OpenRouter / Groq), paid OpenAI & Anthropic, **Test key**, mobile-friendly paste field
 

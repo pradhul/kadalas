@@ -130,5 +130,20 @@ export function createMockGmailService(): GmailService {
         dataBase64: encodeBase64(payload),
       };
     },
+
+    async getMessageView(messageId: string) {
+      const hit = [...byId.values()].find((m) => m.messageId === messageId);
+      if (!hit) throw new Error('Mock message not found');
+      const body = hit.bodyText || hit.snippet || 'Mock email body';
+      return {
+        messageId,
+        subject: hit.subject,
+        from: hit.from,
+        date: hit.date,
+        textBody: body,
+        htmlBody: `<p>${body.replace(/</g, '&lt;')}</p>`,
+        snippet: hit.snippet,
+      };
+    },
   };
 }

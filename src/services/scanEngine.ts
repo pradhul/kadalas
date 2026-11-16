@@ -1,3 +1,4 @@
+import { AttachmentDedupeSet } from '../lib/attachmentFilter';
 import { classifyWithRules } from '../lib/categorisation';
 import { hashBytes } from '../lib/hash';
 import { appendScanEvent } from '../lib/scanPersistSlim';
@@ -45,6 +46,8 @@ export class ScanEngine {
   private skippedAttachmentIds = new Set<string>();
   private stepsSincePersist = 0;
   private lastPersistAt = 0;
+  /** Cross-email decoration fingerprint dedupe for the active job. */
+  private attachmentDedupe = new AttachmentDedupeSet();
 
   subscribe(listener: ScanEngineListener): () => void {
     this.listeners.add(listener);
@@ -165,6 +168,7 @@ export class ScanEngine {
     this.stopRequested = null;
     this.stepsSincePersist = 0;
     this.lastPersistAt = 0;
+    this.attachmentDedupe = new AttachmentDedupeSet();
     this.emit(appendScanEvent(job, `Scan started (${options.mode})`));
     await this.persist(true);
     await this.runLoop();
@@ -294,7 +298,7 @@ export class ScanEngine {
       maxResults: useMocks() ? 40 : DEFAULT_GMAIL_PAGE_SIZE,
       pageToken: this.state.gmailPageToken,
     });
-    let next = ingestSearchPage(this.state, page);
+    let next = ingestSearchPage(this.state, page, new Date().toISOString(), this.attachmentDedupe);
     if (useMocks() && next.stats.emailsChecked >= 100) {
       next = {
         ...next,

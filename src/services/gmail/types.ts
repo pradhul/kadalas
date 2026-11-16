@@ -8,6 +8,13 @@ export interface GmailAttachmentMeta {
   from: string;
   date: string;
   snippet: string;
+  /** Content-Disposition from the MIME part (e.g. inline / attachment). */
+  contentDisposition?: string;
+  /** Content-ID without angle brackets. */
+  contentId?: string;
+  /** True when HTML body references this part via cid:… */
+  referencedAsCid?: boolean;
+  isInline?: boolean;
 }
 
 export interface GmailAttachmentContent extends GmailAttachmentMeta {
@@ -29,6 +36,18 @@ export interface GmailSearchPage {
   messagesInPage: number;
 }
 
+export interface GmailMessageView {
+  messageId: string;
+  subject: string;
+  from: string;
+  date: string;
+  /** Plain-text body when available. */
+  textBody: string;
+  /** Sanitized HTML suitable for a sandboxed iframe (remote images stripped). */
+  htmlBody: string;
+  snippet: string;
+}
+
 export interface GmailService {
   searchMessagesWithAttachments(options: GmailSearchOptions): Promise<GmailAttachmentMeta[]>;
   /** Paginated search used by the resumable full-mailbox scan. */
@@ -42,4 +61,6 @@ export interface GmailService {
     attachmentId: string,
     knownMeta?: Partial<GmailAttachmentMeta>,
   ): Promise<GmailAttachmentContent>;
+  /** Full message for the review "View email" panel. */
+  getMessageView?(messageId: string): Promise<GmailMessageView>;
 }

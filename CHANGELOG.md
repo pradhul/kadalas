@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-11-16
+
+### Fixed
+
+- **Home empty after Approve** — `approveCandidates` no longer overwrites `vault-index.json` with a stale React index snapshot after `upsertDocument`; reloads the fresh index so Gmail-index approvals stay visible
+- My documents / vault list derives from **all** `vault-index.json` entries (Gmail pointer, Drive copy, offline) — not Drive files alone
+
+### Added
+
+- **My documents** as Home: search + category chips, Recent + category groups (Banking, Insurance, IDs, Tax, Bills, Travel, Salary, Medical, …) with counts, storage/expiry badges, empty state CTA
+- Dashboard tiles: document count, pending review, expiring soon (each tappable)
+- Document detail: live preview, View email / Open in Gmail / Ask AI, change category, Make available offline
+- Junk/decoration attachment auto-skip; optimistic Approve/Skip + Approve all; Why? / calibrated confidence / plain review labels
+- Tests for vault list from index in both storage modes
+
+### Changed
+
+- Version bump to **0.1.10**
+
 ## [0.1.9] - 2026-11-16
 
 ### Added
@@ -187,6 +206,9 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.10]: https://github.com/pradhul/kadalas/releases/tag/v0.1.10
+[0.1.9]: https://github.com/pradhul/kadalas/releases/tag/v0.1.9
+[0.1.8]: https://github.com/pradhul/kadalas/releases/tag/v0.1.8
 [0.1.7]: https://github.com/pradhul/kadalas/releases/tag/v0.1.7
 [0.1.6]: https://github.com/pradhul/kadalas/releases/tag/v0.1.6
 [0.1.5]: https://github.com/pradhul/kadalas/releases/tag/v0.1.5

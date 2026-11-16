@@ -37,7 +37,8 @@ export function formatCoverageType(raw?: string | null): string {
     case 'tp_only':
       return 'Third Party / liability only';
     default:
-      return raw?.trim() || 'Unknown cover';
+      // Never leak raw internal enums / unknown subtypes into the UI
+      return '';
   }
 }
 

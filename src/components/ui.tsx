@@ -121,8 +121,16 @@ export function Field({
   );
 }
 
-export function Chip({ label, tone = 'neutral' }: { label: string; tone?: 'neutral' | 'teal' | 'amber' | 'rose' }) {
-  return (
+export function Chip({
+  label,
+  tone = 'neutral',
+  onPress,
+}: {
+  label: string;
+  tone?: 'neutral' | 'teal' | 'amber' | 'rose';
+  onPress?: () => void;
+}) {
+  const content = (
     <View
       style={[
         styles.chip,
@@ -143,6 +151,8 @@ export function Chip({ label, tone = 'neutral' }: { label: string; tone?: 'neutr
       </Text>
     </View>
   );
+  if (onPress) return <Pressable onPress={onPress}>{content}</Pressable>;
+  return content;
 }
 
 export function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -154,11 +164,20 @@ export function SectionTitle({ title, subtitle }: { title: string; subtitle?: st
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
+export function EmptyState({
+  title,
+  body,
+  children,
+}: {
+  title: string;
+  body: string;
+  children?: React.ReactNode;
+}) {
   return (
     <View style={styles.empty}>
       <Text style={styles.h3}>{title}</Text>
       <Text style={styles.caption}>{body}</Text>
+      {children}
     </View>
   );
 }

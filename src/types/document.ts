@@ -125,9 +125,28 @@ export interface ClassificationResult {
   category: VaultCategory;
   title: string;
   metadata: DocumentMetadata;
+  /** 0–1 calibrated confidence */
   confidence: number;
   isImportantDocument: boolean;
+  /** One-line plain-language reason (never internal keys). */
   reason?: string;
+  /** Human-readable signals that supported the classification. */
+  signals?: string[];
+}
+
+/** Cached "Ask AI for more detail" response on a review candidate. */
+export interface AiDetailSummary {
+  documentType?: string;
+  issuer?: string;
+  /** Masked policy / account number */
+  referenceMasked?: string;
+  holderName?: string;
+  registrationNumber?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  summary: string;
+  confidence: number;
+  requestedAt: string;
 }
 
 export type ScanCandidateStatus =
@@ -174,6 +193,15 @@ export interface ScanCandidate {
   driveFileId?: string;
   /** Drive webViewLink after a confirmed successful Approve */
   driveWebViewLink?: string;
+  /**
+   * Why this item was auto-skipped (e.g. "Filtered: email decoration").
+   * Shown under Show skipped; user can restore.
+   */
+  skipReason?: string;
+  /** Cached Ask-AI detail for this review item. */
+  aiDetail?: AiDetailSummary;
+  /** User-corrected category before Approve. */
+  categoryOverride?: VaultCategory;
 }
 
 export interface SyncSuggestion {

@@ -1,12 +1,20 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
-import { Alert, Linking, Platform, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { EmailViewer } from '../../components/EmailViewer';
 import { Banner, Button, Chip, Field, Screen } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useVault } from '../../context/VaultContext';
+import { askAiForDetail } from '../../lib/aiDetail';
 import { isGmailIndexVersion, openDocumentContent } from '../../lib/documentContent';
+import { gmailPermalink } from '../../lib/sanitizeEmailHtml';
+import { documentDisplayTitle, documentStorageBadges } from '../../lib/vaultList';
 import { getCurrentVersion, listVersionHistory } from '../../lib/versioning';
-import { isAvailableOffline, removeOfflineBlob } from '../../services/offlineCache';
+import {
+  isAvailableOffline,
+  putOfflineBlob,
+  removeOfflineBlob,
+} from '../../services/offlineCache';
 import { loadDeviceSettings } from '../../services/settingsPersist';
 import { SyncSuggestion, VAULT_CATEGORIES, VaultCategory } from '../../types/document';
 
@@ -29,10 +37,14 @@ export default function DocumentDetailScreen() {
   const [status, setStatus] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [keepOffline, setKeepOffline] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [offlineBusy, setOfflineBusy] = useState(false);
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: doc?.title || 'Document' });
-  }, [navigation, doc?.title]);
+    navigation.setOptions({ title: doc ? documentDisplayTitle(doc) : 'Document' });
+  }, [navigation, doc]);
 
   useEffect(() => {
     if (!doc) return;
@@ -45,7 +57,7 @@ export default function DocumentDetailScreen() {
     return (
       <Screen>
         <View style={styles.pad}>
-          <Text style={styles.missing}>Document not found.</Text>
+          <Text style={styles.missing}>Document not found in your vault index.</Text>
         </View>
       </Screen>
     );
@@ -53,18 +65,33 @@ export default function DocumentDetailScreen() {
 
   const current = getCurrentVersion(doc);
   const history = listVersionHistory(doc);
+  const badges = documentStorageBadges(doc, { offline });
 
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.pad}>
         <View style={styles.headerRow}>
           <Chip label={category.replace('/', ' · ')} tone="teal" />
-          {doc.metadata.expiryDate ? <Chip label={`Expires ${doc.metadata.expiryDate}`} tone="amber" /> : null}
+          {badges.map((b) => (
+            <Chip key={b} label={b} tone={b === 'On device' ? 'amber' : 'neutral'} />
+          ))}
+          {doc.metadata.expiryDate ? (
+            <Chip label={`Expires ${doc.metadata.expiryDate}`} tone="amber" />
+          ) : null}
         </View>
 
         <Field label="Title" value={title} onChangeText={setTitle} />
-        <Field label="Category (exact path)" value={category} onChangeText={(v) => setCategory(v as VaultCategory)} />
-        <Text style={styles.hint}>Known: {VAULT_CATEGORIES.join(', ')}</Text>
+        <Text style={styles.hint}>Category</Text>
+        <View style={styles.chipWrap}>
+          {VAULT_CATEGORIES.map((c) => (
+            <Chip
+              key={c}
+              label={c.includes('/') ? c.split('/')[1] : c}
+              tone={category === c ? 'teal' : 'neutral'}
+              onPress={() => setCategory(c)}
+            />
+          ))}
+        </View>
         <Field label="Issuer" value={issuer} onChangeText={setIssuer} />
         <Field label="Document type" value={documentType} onChangeText={setDocumentType} />
         <Field label="Reference / policy #" value={referenceNumber} onChangeText={setReferenceNumber} />
@@ -97,7 +124,9 @@ export default function DocumentDetailScreen() {
         <View style={styles.block}>
           <Text style={styles.blockTitle}>Current file</Text>
           <Text style={styles.meta}>{current?.fileName}</Text>
-          <Text style={styles.meta}>{current?.mimeType} · {(current?.sizeBytes || 0).toLocaleString()} bytes</Text>
+          <Text style={styles.meta}>
+            {current?.mimeType} · {(current?.sizeBytes || 0).toLocaleString()} bytes
+          </Text>
           <Text style={styles.meta}>
             {isGmailIndexVersion(current)
               ? 'Stored as Gmail index (opens live from email)'
@@ -112,7 +141,7 @@ export default function DocumentDetailScreen() {
               variant="secondary"
               onPress={async () => {
                 setStatus(null);
-                const result = await openDocumentContent(doc, { cacheOffline: keepOffline });
+                const result = await openDocumentContent(doc, { cacheOffline: keepOffline || offline });
                 if (!result.ok) {
                   setStatus(result.error);
                   return;
@@ -138,14 +167,13 @@ export default function DocumentDetailScreen() {
                   return;
                 }
                 setStatus(`Loaded from ${result.source} (${result.fileName})`);
-                if (current) setOffline(isAvailableOffline(doc.id, current.id) || keepOffline);
               }}
             />
             <Button
               title="Share"
               variant="ghost"
               onPress={async () => {
-                const message = `${doc.title}\n${doc.category}\nRef: ${doc.metadata.referenceNumber || '—'}`;
+                const message = `${documentDisplayTitle(doc)}\n${doc.category}\nRef: ${doc.metadata.referenceNumber || '—'}`;
                 if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.share) {
                   await navigator.share({ title: doc.title, text: message });
                 } else {
@@ -154,17 +182,113 @@ export default function DocumentDetailScreen() {
               }}
             />
           </View>
-          {offline && current ? (
-            <Button
-              title="Remove offline copy"
-              variant="ghost"
-              onPress={async () => {
-                await removeOfflineBlob(doc.id, current.id);
-                setOffline(false);
-                setStatus('Removed local copy only (Gmail/Drive untouched).');
-              }}
-            />
-          ) : null}
+          <View style={styles.row}>
+            {current?.gmailMessageId ? (
+              <>
+                <Button title="View email" variant="secondary" onPress={() => setEmailOpen(true)} />
+                <Button
+                  title="Open in Gmail"
+                  variant="ghost"
+                  onPress={() => void Linking.openURL(gmailPermalink(current.gmailMessageId!))}
+                />
+              </>
+            ) : null}
+          </View>
+          <Button
+            title={offline ? 'Remove offline copy' : 'Make available offline'}
+            variant="ghost"
+            loading={offlineBusy}
+            onPress={async () => {
+              if (!current) return;
+              setOfflineBusy(true);
+              setStatus(null);
+              try {
+                if (offline) {
+                  await removeOfflineBlob(doc.id, current.id);
+                  setOffline(false);
+                  setStatus('Removed local copy only (Gmail/Drive untouched).');
+                } else {
+                  const result = await openDocumentContent(doc, { cacheOffline: true });
+                  if (!result.ok || !result.dataBase64) {
+                    // For Drive-only, try fetching via open then fail gracefully
+                    setStatus(result.ok ? 'Opened Drive file — download bytes unavailable to cache.' : result.error);
+                    return;
+                  }
+                  await putOfflineBlob({
+                    docId: doc.id,
+                    versionId: current.id,
+                    fileName: current.fileName,
+                    mimeType: current.mimeType,
+                    sizeBytes: current.sizeBytes,
+                    dataBase64: result.dataBase64,
+                  });
+                  setOffline(true);
+                  setStatus('Saved on this device for offline viewing.');
+                }
+              } catch (e) {
+                setStatus(e instanceof Error ? e.message : 'Offline cache failed');
+              } finally {
+                setOfflineBusy(false);
+              }
+            }}
+          />
+        </View>
+
+        <View style={styles.block}>
+          <Text style={styles.blockTitle}>Ask AI</Text>
+          <Text style={styles.meta}>
+            Uses your BYOK key to summarize this document (subject, sender, snippet, PDF text when available).
+          </Text>
+          <Button
+            title="Ask AI for more detail"
+            loading={aiBusy}
+            onPress={async () => {
+              setAiBusy(true);
+              setStatus(null);
+              try {
+                const detail = await askAiForDetail({
+                  id: doc.id,
+                  gmailMessageId: current?.gmailMessageId || '',
+                  gmailAttachmentId: current?.gmailAttachmentId || '',
+                  subject: current?.gmailSubject || doc.title,
+                  from: current?.gmailFrom || '',
+                  date: current?.gmailDate || doc.createdAt,
+                  fileName: current?.fileName || 'document',
+                  mimeType: current?.mimeType || 'application/pdf',
+                  sizeBytes: current?.sizeBytes || 0,
+                  status: 'approved',
+                  previewSnippet: current?.gmailSubject,
+                  classification: {
+                    category: doc.category,
+                    title: doc.title,
+                    metadata: doc.metadata,
+                    confidence: 0.5,
+                    isImportantDocument: true,
+                  },
+                });
+                setAiSummary(
+                  [
+                    detail.summary,
+                    detail.issuer ? `Issuer: ${detail.issuer}` : null,
+                    detail.documentType ? `Type: ${detail.documentType}` : null,
+                    detail.referenceMasked ? `Ref: ${detail.referenceMasked}` : null,
+                    detail.holderName ? `Holder: ${detail.holderName}` : null,
+                    detail.registrationNumber ? `Reg: ${detail.registrationNumber}` : null,
+                    detail.issueDate || detail.expiryDate
+                      ? `Dates: ${detail.issueDate || '—'} → ${detail.expiryDate || '—'}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join('\n'),
+                );
+              } catch (e) {
+                setStatus(e instanceof Error ? e.message : 'Ask AI failed');
+              } finally {
+                setAiBusy(false);
+              }
+            }}
+          />
+          {aiSummary ? <Banner>{aiSummary}</Banner> : null}
         </View>
 
         <View style={styles.block}>
@@ -193,79 +317,67 @@ export default function DocumentDetailScreen() {
               }
             }}
           />
-
           {suggestion ? (
-            <View style={styles.suggestion}>
+            <View style={{ gap: 8, marginTop: 8 }}>
               <Banner>
-                Found: {suggestion.candidate.fileName} — {suggestion.reason} (confidence{' '}
-                {Math.round(suggestion.confidence * 100)}%)
+                Found candidate: {suggestion.candidate.fileName} — {suggestion.reason}
               </Banner>
-              <Text style={styles.meta}>{suggestion.candidate.subject}</Text>
-              <Text style={styles.meta}>From {suggestion.candidate.from}</Text>
-              <Text style={styles.meta}>{new Date(suggestion.candidate.date).toLocaleString()}</Text>
-              <View style={styles.row}>
-                <Button
-                  title="Make current version"
-                  onPress={async () => {
-                    await confirmSync(suggestion);
-                    setSuggestion(null);
-                    setStatus('New version saved; previous kept in history.');
-                    if (Platform.OS !== 'web') {
-                      Alert.alert('Synced', 'Document updated from Gmail.');
-                    }
-                  }}
-                />
-                <Button title="Dismiss" variant="ghost" onPress={() => setSuggestion(null)} />
-              </View>
+              <Button
+                title="Confirm as newer version"
+                onPress={async () => {
+                  await confirmSync(suggestion);
+                  setSuggestion(null);
+                  setStatus('Version updated in vault index');
+                }}
+              />
             </View>
           ) : null}
         </View>
 
-        <View style={styles.block}>
-          <Text style={styles.blockTitle}>Version history</Text>
-          {history.map((v) => (
-            <View key={v.id} style={styles.versionRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.metaStrong}>
-                  {v.fileName}
-                  {v.id === doc.currentVersionId ? ' · current' : ''}
-                </Text>
-                <Text style={styles.meta}>
-                  {new Date(v.createdAt).toLocaleString()} · {v.source}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
+        {history.length > 1 ? (
+          <View style={styles.block}>
+            <Text style={styles.blockTitle}>Versions</Text>
+            {history.map((v) => (
+              <Text key={v.id} style={styles.meta}>
+                {v.fileName} · {new Date(v.createdAt).toLocaleDateString()} · {v.source}
+              </Text>
+            ))}
+          </View>
+        ) : null}
 
-        {status ? <Banner>{status}</Banner> : null}
+        {status ? <Banner tone="info">{status}</Banner> : null}
       </ScrollView>
+
+      {current?.gmailMessageId ? (
+        <EmailViewer
+          visible={emailOpen}
+          messageId={current.gmailMessageId}
+          attachmentId={current.gmailAttachmentId}
+          fileName={current.fileName}
+          mimeType={current.mimeType}
+          onClose={() => setEmailOpen(false)}
+        />
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  pad: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: 4 },
-  headerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.md },
-  hint: { ...typography.caption, color: colors.inkMuted, marginBottom: spacing.md },
+  pad: { padding: spacing.lg, gap: spacing.sm, paddingBottom: 96 },
+  missing: { ...typography.body, color: colors.inkMuted, padding: spacing.lg },
+  headerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
+  hint: { ...typography.caption, color: colors.inkMuted },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.sm },
   block: {
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.line,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    gap: 6,
     backgroundColor: colors.paperElevated,
-    gap: 8,
+    marginTop: spacing.sm,
   },
   blockTitle: { ...typography.h3, color: colors.ink },
   meta: { ...typography.caption, color: colors.inkMuted },
-  metaStrong: { ...typography.bodyStrong, color: colors.ink },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  suggestion: { marginTop: 8, gap: 6 },
-  versionRow: {
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  missing: { ...typography.body, color: colors.inkMuted, padding: spacing.lg },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
 });

@@ -1,3 +1,4 @@
+import { AttachmentDedupeSet, shouldKeepAttachment } from './attachmentFilter';
 import { shouldConsiderAttachment } from './categorisation';
 import { findDuplicateInVault } from './dedup';
 import { GmailAttachmentMeta } from '../services/gmail/types';
@@ -56,15 +57,27 @@ export function createScanJob(options: {
   });
 }
 
-/** Tiny / junk image and size heuristics on top of existing promo filters. */
-export function passesRulePrefilter(att: GmailAttachmentMeta): boolean {
-  if (att.size > 0 && att.size < 8_000 && /^image\//i.test(att.mimeType)) {
-    return false; // tiny inline logos
-  }
-  if (/^(logo|icon|spacer|tracking|pixel|signature)[-_.]/i.test(att.filename)) {
-    return false;
-  }
-  if (/\.(gif|bmp|svg)$/i.test(att.filename)) return false;
+/** Junk / decoration + promo heuristics before triage. */
+export function passesRulePrefilter(
+  att: GmailAttachmentMeta,
+  dedupe?: AttachmentDedupeSet,
+): boolean {
+  const keepDecoration = shouldKeepAttachment(
+    {
+      fileName: att.filename,
+      mimeType: att.mimeType,
+      size: att.size,
+      subject: att.subject,
+      from: att.from,
+      snippet: att.snippet,
+      contentDisposition: att.contentDisposition,
+      contentId: att.contentId,
+      referencedAsCid: att.referencedAsCid,
+      isInline: att.isInline,
+    },
+    dedupe,
+  );
+  if (!keepDecoration) return false;
 
   return shouldConsiderAttachment({
     subject: att.subject,
@@ -89,6 +102,7 @@ export function ingestSearchPage(
     messagesInPage?: number;
   },
   nowIso: string = new Date().toISOString(),
+  dedupe?: AttachmentDedupeSet,
 ): ScanJobState {
   const checked = state.stats.emailsChecked + (page.messagesInPage ?? page.attachments.length);
   // Gmail resultSizeEstimate often under-reports (~201) and resets every page — never shrink.
@@ -128,7 +142,7 @@ export function ingestSearchPage(
     if (next.items[id]) continue;
 
     next.stats.attachmentsFound += 1;
-    const keep = passesRulePrefilter(att);
+    const keep = passesRulePrefilter(att, dedupe);
     if (!keep) {
       next.stats.filteredOut += 1;
       next.items[id] = { id, attachment: att, status: 'filtered_out' };

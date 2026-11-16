@@ -36,6 +36,8 @@ import {
   reclaimFalseApprovals,
   runApproveFlow,
 } from '../lib/approveFlow';
+import { debounceIdle } from '../lib/asyncUtils';
+import { autoSkipDecorationCandidates } from '../lib/autoSkipDecorations';
 import { rekeyDemoVehicleSubjects } from '../lib/rekeyDemoSubjects';
 import { getActiveStageLabel } from '../lib/scanPipeline';
 import { DEFAULT_STORAGE_MODE, StorageMode } from '../types/settings';
@@ -80,6 +82,8 @@ interface VaultContextValue {
   rejectCandidate: (id: string) => Promise<void>;
   /** Restore a skipped item back to pending and remove from skipped-id set. */
   restoreSkippedCandidate: (id: string) => Promise<void>;
+  /** Patch a review candidate (AI detail cache, category override) — sync UI first. */
+  patchScanCandidate: (id: string, patch: Partial<ScanCandidate>) => void;
   resolveAmbiguousSubject: (candidateId: string, subjectKey: string) => void;
   syncDocument: (docId: string) => Promise<SyncSuggestion | null>;
   confirmSync: (suggestion: SyncSuggestion) => Promise<void>;
@@ -151,35 +155,100 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   reviewRef.current = reviewState;
   const candidatesRef = useRef(lastScanCandidates);
   candidatesRef.current = lastScanCandidates;
+  const pendingPersist = useRef<{ candidates: ScanCandidate[]; skippedIds?: string[] } | null>(
+    null,
+  );
+
+  const flushPersistReview = useCallback(async () => {
+    const partial = pendingPersist.current;
+    if (!partial) return null;
+    pendingPersist.current = null;
+    const base = reviewRef.current;
+    const fromRejected = partial.candidates
+      .filter((c) => c.status === 'rejected')
+      .map(attachmentSkipKey);
+    const prior = partial.skippedIds ?? base.skippedIds;
+    const keptPrior = prior.filter((id) => {
+      const still = partial.candidates.find((c) => attachmentSkipKey(c) === id);
+      return !still || still.status === 'rejected';
+    });
+    const uniqueSkipped = [...new Set([...fromRejected, ...keptPrior])];
+    const next: ReviewState = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      candidates: partial.candidates,
+      skippedIds: uniqueSkipped,
+      lastSyncedAt: base.lastSyncedAt,
+    };
+    const saved = await saveReviewState(next);
+    reviewRef.current = saved;
+    setReviewState(saved);
+    setLastSyncedAt(saved.lastSyncedAt);
+    getScanEngine().setSkippedAttachmentIds(saved.skippedIds);
+    return saved;
+  }, []);
+
+  const debouncedPersist = useMemo(
+    () =>
+      debounceIdle(() => {
+        void flushPersistReview();
+      }, 800),
+    [flushPersistReview],
+  );
 
   const persistReview = useCallback(
-    async (partial: { candidates: ScanCandidate[]; skippedIds?: string[] }) => {
-      const base = reviewRef.current;
-      const fromRejected = partial.candidates
-        .filter((c) => c.status === 'rejected')
-        .map(attachmentSkipKey);
-      const prior = partial.skippedIds ?? base.skippedIds;
-      const keptPrior = prior.filter((id) => {
-        const still = partial.candidates.find((c) => attachmentSkipKey(c) === id);
-        return !still || still.status === 'rejected';
-      });
-      const uniqueSkipped = [...new Set([...fromRejected, ...keptPrior])];
-      const next: ReviewState = {
-        version: 1,
-        updatedAt: new Date().toISOString(),
+    async (partial: { candidates: ScanCandidate[]; skippedIds?: string[] }, opts?: { flush?: boolean }) => {
+      pendingPersist.current = partial;
+      // Keep local reviewRef candidates in sync immediately for subsequent merges
+      reviewRef.current = {
+        ...reviewRef.current,
         candidates: partial.candidates,
-        skippedIds: uniqueSkipped,
-        lastSyncedAt: base.lastSyncedAt,
+        skippedIds: partial.skippedIds ?? reviewRef.current.skippedIds,
+        updatedAt: new Date().toISOString(),
       };
-      const saved = await saveReviewState(next);
-      reviewRef.current = saved;
-      setReviewState(saved);
-      setLastSyncedAt(saved.lastSyncedAt);
-      getScanEngine().setSkippedAttachmentIds(saved.skippedIds);
-      return saved;
+      if (opts?.flush) {
+        debouncedPersist.cancel();
+        return flushPersistReview();
+      }
+      debouncedPersist();
+      return reviewRef.current;
     },
-    [],
+    [debouncedPersist, flushPersistReview],
   );
+
+  useEffect(() => {
+    const flush = () => {
+      debouncedPersist.flush();
+      void flushPersistReview();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', flush);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', flush);
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', flush);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('pagehide', flush);
+      }
+      flush();
+    };
+  }, [debouncedPersist, flushPersistReview]);
+
+  function applyAutoSkip(candidates: ScanCandidate[], skippedIds: string[]) {
+    const auto = autoSkipDecorationCandidates(candidates);
+    if (!auto.changedIds.length) {
+      return { candidates, skippedIds, changedIds: [] as string[] };
+    }
+    return {
+      candidates: auto.candidates,
+      skippedIds: [...new Set([...skippedIds, ...auto.skippedIds])],
+      changedIds: auto.changedIds,
+    };
+  }
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -206,22 +275,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       if (review.lastSyncedAt) setLastSyncedAt(review.lastSyncedAt);
       getScanEngine().setSkippedAttachmentIds(review.skippedIds);
 
-      // Restore review queue; roll back false approvals with no vault Drive file
+      // Restore review queue; roll back false approvals; auto-skip email decorations
       if (review.candidates.length) {
         const reclaimed = reclaimFalseApprovals(review.candidates, next.documents);
+        const auto = applyAutoSkip(reclaimed.candidates, review.skippedIds);
         setLastScanCandidates((prev) =>
           prev.length
-            ? mergeReviewCandidates(prev, { ...review, candidates: reclaimed.candidates })
-            : reclaimed.candidates,
+            ? mergeReviewCandidates(prev, { ...review, candidates: auto.candidates })
+            : auto.candidates,
         );
-        if (reclaimed.reclaimedIds.length) {
-          getScanEngine().logEvent(
-            `Reclaimed ${reclaimed.reclaimedIds.length} false approval(s) → pending (no Drive file)`,
+        if (reclaimed.reclaimedIds.length || auto.changedIds.length) {
+          if (auto.changedIds.length) {
+            getScanEngine().logEvent(
+              `Auto-skipped ${auto.changedIds.length} email decoration(s)`,
+            );
+          }
+          if (reclaimed.reclaimedIds.length) {
+            getScanEngine().logEvent(
+              `Reclaimed ${reclaimed.reclaimedIds.length} false approval(s) → pending (no Drive file)`,
+            );
+          }
+          await persistReview(
+            { candidates: auto.candidates, skippedIds: auto.skippedIds },
+            { flush: true },
           );
-          review.candidates = reclaimed.candidates;
-          reviewRef.current = review;
-          setReviewState(review);
-          await saveReviewState(review);
         }
       }
     } catch (e) {
@@ -250,18 +327,25 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setScanJob(s);
         let merged = mergeReviewCandidates(s.candidates, review);
         const reclaimed = reclaimFalseApprovals(merged, vaultDocs);
-        merged = reclaimed.candidates;
+        const auto = applyAutoSkip(reclaimed.candidates, review.skippedIds);
+        merged = auto.candidates;
         setLastScanCandidates(merged);
-        if (review.candidates.length || review.skippedIds.length || reclaimed.reclaimedIds.length) {
-          void persistReview({ candidates: merged, skippedIds: review.skippedIds });
+        if (
+          review.candidates.length ||
+          review.skippedIds.length ||
+          reclaimed.reclaimedIds.length ||
+          auto.changedIds.length
+        ) {
+          void persistReview({ candidates: merged, skippedIds: auto.skippedIds });
         }
       } else if (review.candidates.length) {
         const reclaimed = reclaimFalseApprovals(review.candidates, vaultDocs);
-        setLastScanCandidates(reclaimed.candidates);
-        if (reclaimed.reclaimedIds.length) {
+        const auto = applyAutoSkip(reclaimed.candidates, review.skippedIds);
+        setLastScanCandidates(auto.candidates);
+        if (reclaimed.reclaimedIds.length || auto.changedIds.length) {
           void persistReview({
-            candidates: reclaimed.candidates,
-            skippedIds: review.skippedIds,
+            candidates: auto.candidates,
+            skippedIds: auto.skippedIds,
           });
         }
       }
@@ -270,15 +354,22 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     return engine.subscribe((state) => {
       setScanJob({ ...state });
-      const merged = mergeReviewCandidates(state.candidates, reviewRef.current);
+      let merged = mergeReviewCandidates(state.candidates, reviewRef.current);
+      const auto = applyAutoSkip(merged, reviewRef.current.skippedIds);
+      merged = auto.candidates;
       setLastScanCandidates(merged);
       setScanEngineRunning(engine.isRunning());
       // Flush review queue to Drive when the scan finishes (approve/skip persist immediately).
       if (state.stage === 'completed' || state.stage === 'cancelled') {
-        void persistReview({
-          candidates: merged,
-          skippedIds: reviewRef.current.skippedIds,
-        });
+        void persistReview(
+          {
+            candidates: merged,
+            skippedIds: auto.skippedIds,
+          },
+          { flush: true },
+        );
+      } else if (auto.changedIds.length) {
+        void persistReview({ candidates: merged, skippedIds: auto.skippedIds });
       }
     });
   }, [persistReview]);
@@ -390,7 +481,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         subjectOverrides,
         applySubjectOverride,
         save: async (candidate) => {
-          const result = await approveCandidateByMode(candidate, mode);
+          const overrideCat = candidate.categoryOverride;
+          const result = await approveCandidateByMode(
+            candidate,
+            mode,
+            overrideCat
+              ? {
+                  category: overrideCat,
+                  metadata: candidate.classification?.metadata,
+                }
+              : undefined,
+          );
           return {
             category: result.category,
             title: result.document.title,
@@ -401,8 +502,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         },
       });
 
+      // Synchronous UI update before Drive round-trip flush
       setLastScanCandidates(flow.candidates);
-      await persistReview({
+      candidatesRef.current = flow.candidates;
+      void persistReview({
         candidates: flow.candidates,
         skippedIds: reviewRef.current.skippedIds,
       });
@@ -418,30 +521,47 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      if (flow.saved.length && index) {
+      if (flow.saved.length) {
+        // CRITICAL: upsertDocument already wrote the new docs into vault-index.json.
+        // Never overwrite with a stale React `index` snapshot — that wiped Gmail-index
+        // approvals and made Home look empty after Approve.
         const drive = getDriveService();
+        const fresh = await drive.loadIndex();
         const next = {
-          ...index,
+          ...fresh,
           lastScanAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          settings: fresh.settings ?? index?.settings,
         };
         await drive.saveIndex(next);
         setIndex(next);
         setLastSyncedAt(next.updatedAt);
-        await refresh();
       }
 
       return { saved: flow.saved, failed: flow.failed };
     },
-    [lastScanCandidates, index, refresh, persistReview],
+    [lastScanCandidates, index, persistReview],
   );
+
+  const patchScanCandidate = useCallback((id: string, patch: Partial<ScanCandidate>) => {
+    const nextCandidates = candidatesRef.current.map((c) =>
+      c.id === id ? { ...c, ...patch } : c,
+    );
+    candidatesRef.current = nextCandidates;
+    setLastScanCandidates(nextCandidates);
+    void persistReview({
+      candidates: nextCandidates,
+      skippedIds: reviewRef.current.skippedIds,
+    });
+  }, [persistReview]);
 
   const rejectCandidate = useCallback(
     async (id: string) => {
       const target = candidatesRef.current.find((c) => c.id === id);
       const nextCandidates = candidatesRef.current.map((c) =>
-        c.id === id ? { ...c, status: 'rejected' as const } : c,
+        c.id === id ? { ...c, status: 'rejected' as const, skipReason: c.skipReason } : c,
       );
+      candidatesRef.current = nextCandidates;
       setLastScanCandidates(nextCandidates);
       const skippedIds = [...reviewRef.current.skippedIds];
       if (target) {
@@ -601,6 +721,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       approveCandidates,
       rejectCandidate,
       restoreSkippedCandidate,
+      patchScanCandidate,
       resolveAmbiguousSubject,
       syncDocument,
       confirmSync,
@@ -633,6 +754,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       approveCandidates,
       rejectCandidate,
       restoreSkippedCandidate,
+      patchScanCandidate,
       resolveAmbiguousSubject,
       syncDocument,
       confirmSync,

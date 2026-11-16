@@ -17,21 +17,36 @@ import { Banner, Button, Screen, SectionTitle } from '../components/ui';
 import { colors, radii, spacing, typography } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 import { useVault } from '../context/VaultContext';
+import { EmailViewer } from '../components/EmailViewer';
 import { destinationFolderPath } from '../lib/approveFlow';
-import { formatCoverageType } from '../lib/coverageSlots';
+import { askAiForDetail } from '../lib/aiDetail';
+import { DECORATION_SKIP_LABEL } from '../lib/attachmentFilter';
 import { buildGroupedReview, groupCandidatesBySubject } from '../lib/grouping';
+import {
+  confidenceBand,
+  confidenceLabel,
+  reviewCardSubtitle,
+} from '../lib/reviewLabels';
 import {
   formatSubjectSuggestionLabel,
   isVehicleReviewFamily,
 } from '../lib/subjectSuggestions';
 import { MOCK_SCAN_CANDIDATES } from '../mocks/data';
 import { useMocks } from '../services/config';
-import type { ScanCandidate, VaultDocument } from '../types/document';
+import type { ScanCandidate, VaultCategory, VaultDocument } from '../types/document';
+import { VAULT_CATEGORIES } from '../types/document';
 
 type ToastState =
   | { kind: 'skip'; id: string; fileName: string }
   | { kind: 'approve'; id: string; message: string; webViewLink?: string }
   | null;
+
+type CardUi =
+  | { state: 'idle' }
+  | { state: 'saving' }
+  | { state: 'saved'; message: string }
+  | { state: 'skipping' }
+  | { state: 'error'; message: string };
 
 type ReviewRow = {
   id: string;
@@ -51,20 +66,35 @@ export default function ScanReviewScreen() {
     approveCandidates,
     rejectCandidate,
     restoreSkippedCandidate,
+    patchScanCandidate,
     seedScanCandidates,
     reviewStats,
     lastSyncedAt,
     vaultFolderUrl,
     storageMode = 'gmail_index',
   } = vault;
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [cardUi, setCardUi] = useState<Record<string, CardUi>>({});
+  const inFlight = useRef<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Record<string, string | null>>({});
   const [showSkipped, setShowSkipped] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [emailFor, setEmailFor] = useState<ScanCandidate | null>(null);
+  const [approveAll, setApproveAll] = useState<{ done: number; total: number } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
+
+  const localStats = useMemo(() => {
+    const base = reviewStats || { toReview: 0, approved: 0, skipped: 0 };
+    const saving = Object.values(cardUi).filter((u) => u.state === 'saving' || u.state === 'skipping').length;
+    // Instant count feedback while optimistic ops run
+    return {
+      toReview: Math.max(0, base.toReview - saving),
+      approved: base.approved + Object.values(cardUi).filter((u) => u.state === 'saved').length,
+      skipped: base.skipped,
+    };
+  }, [reviewStats, cardUi]);
 
   const hydrating = authLoading || vaultLoading;
 
@@ -117,49 +147,99 @@ export default function ScanReviewScreen() {
     }, 5000);
   }
 
-  async function act(id: string, fn: () => Promise<void>) {
-    setBusyId(id);
-    setError(null);
-    try {
-      await fn();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   const handleApprove = useCallback(
     async (c: ScanCandidate) => {
+      if (inFlight.current.has(c.id)) return;
+      inFlight.current.add(c.id);
+      setCardUi((prev) => ({ ...prev, [c.id]: { state: 'saving' } }));
+      setError(null);
       const selected = selectedKeys[c.id];
-      const { saved, failed } = await approveCandidates(
-        [c.id],
-        selected ? { [c.id]: selected } : undefined,
-      );
-      setSelectedKeys((prev) => {
-        const next = { ...prev };
-        delete next[c.id];
-        return next;
-      });
-      if (saved.length) {
-        const ok = saved[0];
-        showToast({
-          kind: 'approve',
-          id: c.id,
-          message: ok.message || (storageMode === 'gmail_index' ? 'Saved to your vault' : `Saved to Drive › ${ok.folderPath}`),
-          webViewLink: ok.webViewLink,
-        });
-      }
-      if (failed.length && !saved.length) {
-        setError(
-          storageMode === 'gmail_index'
-            ? `Couldn't save to vault: ${failed[0].reason}`
-            : `Couldn't save to Drive: ${failed[0].reason}`,
+      try {
+        const { saved, failed } = await approveCandidates(
+          [c.id],
+          selected ? { [c.id]: selected } : undefined,
         );
+        setSelectedKeys((prev) => {
+          const next = { ...prev };
+          delete next[c.id];
+          return next;
+        });
+        if (saved.length) {
+          const ok = saved[0];
+          const message =
+            ok.message ||
+            (storageMode === 'gmail_index' ? 'Saved to your vault' : `Saved to Drive › ${ok.folderPath}`);
+          setCardUi((prev) => ({ ...prev, [c.id]: { state: 'saved', message } }));
+          showToast({ kind: 'approve', id: c.id, message, webViewLink: ok.webViewLink });
+          setTimeout(() => {
+            setCardUi((prev) => {
+              const next = { ...prev };
+              delete next[c.id];
+              return next;
+            });
+          }, 600);
+        } else if (failed.length) {
+          setCardUi((prev) => ({
+            ...prev,
+            [c.id]: { state: 'error', message: failed[0].reason },
+          }));
+        }
+      } catch (e) {
+        setCardUi((prev) => ({
+          ...prev,
+          [c.id]: { state: 'error', message: e instanceof Error ? e.message : String(e) },
+        }));
+      } finally {
+        inFlight.current.delete(c.id);
       }
     },
-    [approveCandidates, selectedKeys],
+    [approveCandidates, selectedKeys, storageMode],
   );
+
+  const handleSkip = useCallback(
+    async (c: ScanCandidate) => {
+      if (inFlight.current.has(c.id)) return;
+      inFlight.current.add(c.id);
+      setCardUi((prev) => ({ ...prev, [c.id]: { state: 'skipping' } }));
+      showToast({ kind: 'skip', id: c.id, fileName: c.fileName });
+      try {
+        await rejectCandidate(c.id);
+        setTimeout(() => {
+          setCardUi((prev) => {
+            const next = { ...prev };
+            delete next[c.id];
+            return next;
+          });
+        }, 400);
+      } catch (e) {
+        setCardUi((prev) => ({
+          ...prev,
+          [c.id]: { state: 'error', message: e instanceof Error ? e.message : String(e) },
+        }));
+      } finally {
+        inFlight.current.delete(c.id);
+      }
+    },
+    [rejectCandidate],
+  );
+
+  const handleApproveAll = useCallback(async () => {
+    const pending = visibleCandidates.filter(
+      (c) =>
+        (c.status === 'pending' || c.status === 'needs_subject_confirm') &&
+        c.isGroupLatest !== false &&
+        !inFlight.current.has(c.id),
+    );
+    if (!pending.length) return;
+    setApproveAll({ done: 0, total: pending.length });
+    let done = 0;
+    for (const c of pending) {
+      await handleApprove(c);
+      done += 1;
+      setApproveAll({ done, total: pending.length });
+    }
+    setTimeout(() => setApproveAll(null), 1200);
+  }, [visibleCandidates, handleApprove]);
 
   if (hydrating && !lastScanCandidates.length) {
     return (
@@ -183,7 +263,7 @@ export default function ScanReviewScreen() {
           </Pressable>
           <SectionTitle
             title="Review scan results"
-            subtitle={`${reviewStats?.toReview ?? 0} to review · ${reviewStats?.approved ?? 0} approved · ${reviewStats?.skipped ?? 0} skipped`}
+            subtitle={`${localStats.toReview} to review · ${localStats.approved} approved · ${localStats.skipped} skipped`}
           />
           <Banner>
             {storageMode === 'gmail_index'
@@ -204,6 +284,27 @@ export default function ScanReviewScreen() {
               testID="show-skipped-toggle"
             />
           </View>
+          <Button
+            title="Approve all visible"
+            variant="secondary"
+            onPress={() => void handleApproveAll()}
+            disabled={Boolean(approveAll) || localStats.toReview === 0}
+          />
+          {approveAll ? (
+            <View style={styles.approveAllBar} testID="approve-all-progress">
+              <Text style={styles.meta}>
+                Approving {approveAll.done}/{approveAll.total}
+              </Text>
+              <View style={styles.barTrack}>
+                <View
+                  style={[
+                    styles.barFill,
+                    { width: `${Math.round((approveAll.done / Math.max(approveAll.total, 1)) * 100)}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          ) : null}
         </View>
 
         {error || renderError ? <Banner tone="warn">{error || renderError}</Banner> : null}
@@ -247,7 +348,7 @@ export default function ScanReviewScreen() {
                   candidate={c}
                   vaultDocuments={documents}
                   storageMode={storageMode}
-                  busy={busyId === c.id}
+                  ui={cardUi[c.id] || { state: 'idle' }}
                   selectedKey={selectedKeys[c.id] ?? null}
                   onToggleChip={(key) =>
                     setSelectedKeys((prev) => ({
@@ -255,19 +356,51 @@ export default function ScanReviewScreen() {
                       [c.id]: prev[c.id] === key ? null : key,
                     }))
                   }
-                  onApprove={() => act(c.id, () => handleApprove(c))}
-                  onReject={() =>
-                    act(c.id, async () => {
-                      await rejectCandidate(c.id);
-                      showToast({ kind: 'skip', id: c.id, fileName: c.fileName });
+                  onApprove={() => void handleApprove(c)}
+                  onReject={() => void handleSkip(c)}
+                  onRestore={() => {
+                    if (inFlight.current.has(c.id)) return;
+                    void restoreSkippedCandidate(c.id);
+                  }}
+                  onViewEmail={() => setEmailFor(c)}
+                  onAskAi={async () => {
+                    try {
+                      const detail = await askAiForDetail(c);
+                      patchScanCandidate(c.id, { aiDetail: detail });
+                    } catch (e) {
+                      setCardUi((prev) => ({
+                        ...prev,
+                        [c.id]: {
+                          state: 'error',
+                          message: e instanceof Error ? e.message : 'Ask AI failed',
+                        },
+                      }));
+                    }
+                  }}
+                  onCategory={(cat) =>
+                    patchScanCandidate(c.id, {
+                      categoryOverride: cat,
+                      classification: c.classification
+                        ? { ...c.classification, category: cat }
+                        : c.classification,
                     })
                   }
-                  onRestore={() => act(c.id, () => restoreSkippedCandidate(c.id))}
                 />
               ))}
             </View>
           )}
         />
+
+        {emailFor ? (
+          <EmailViewer
+            visible
+            messageId={emailFor.gmailMessageId}
+            attachmentId={emailFor.gmailAttachmentId}
+            fileName={emailFor.fileName}
+            mimeType={emailFor.mimeType}
+            onClose={() => setEmailFor(null)}
+          />
+        ) : null}
 
         {toast ? (
           <Animated.View
@@ -325,26 +458,35 @@ const CandidateCard = memo(function CandidateCard({
   candidate: c,
   vaultDocuments,
   storageMode,
-  busy,
+  ui,
   selectedKey,
   onToggleChip,
   onApprove,
   onReject,
   onRestore,
+  onViewEmail,
+  onAskAi,
+  onCategory,
 }: {
   candidate: ScanCandidate;
   vaultDocuments: VaultDocument[];
   storageMode: 'gmail_index' | 'drive_copies';
-  busy: boolean;
+  ui: CardUi;
   selectedKey: string | null;
   onToggleChip: (key: string) => void;
   onApprove: () => void;
   onReject: () => void;
   onRestore: () => void;
+  onViewEmail: () => void;
+  onAskAi: () => Promise<void>;
+  onCategory: (cat: VaultCategory) => void;
 }) {
+  const [why, setWhy] = useState(false);
+  const [askBusy, setAskBusy] = useState(false);
   const m = c.classification?.metadata ?? {};
-  const skipped = c.status === 'rejected';
-  const approved = c.status === 'approved';
+  const skipped = c.status === 'rejected' || ui.state === 'skipping';
+  const approved = c.status === 'approved' || ui.state === 'saved';
+  const busy = ui.state === 'saving' || ui.state === 'skipping';
   const done = approved || skipped || c.status === 'duplicate';
   const showCover = isVehicleReviewFamily(c.classification?.category, m.documentType);
   const possibleKeys =
@@ -353,24 +495,30 @@ const CandidateCard = memo(function CandidateCard({
     storageMode === 'gmail_index'
       ? 'Vault index (Gmail pointer)'
       : destinationFolderPath(c.classification?.category);
+  const band = confidenceBand(c.classification?.confidence);
+  const subtitle = reviewCardSubtitle(c);
 
-  const subjectDisplay =
-    m.subjectLabel && !String(m.subjectLabel).includes(':')
-      ? m.subjectLabel
-      : m.subjectKey
-        ? formatSubjectSuggestionLabel(m.subjectKey, vaultDocuments)
-        : null;
-
-  if (skipped) {
+  if (skipped && c.status === 'rejected') {
     return (
       <View style={[styles.card, styles.cardSkipped]} testID={`review-card-${c.id}`}>
         <View style={styles.skippedRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>{c.fileName}</Text>
-            <Text style={styles.status}>Skipped</Text>
+            <Text style={styles.status}>{c.skipReason || 'Skipped'}</Text>
+            {c.skipReason === DECORATION_SKIP_LABEL ? (
+              <Text style={styles.meta}>Email decoration — restore if this was a real document</Text>
+            ) : null}
           </View>
           <Button title="Restore" variant="secondary" disabled={busy} onPress={onRestore} />
         </View>
+      </View>
+    );
+  }
+
+  if (ui.state === 'skipping') {
+    return (
+      <View style={[styles.card, styles.cardSkipped]} testID={`review-card-${c.id}`}>
+        <Text style={styles.meta}>Skipping…</Text>
       </View>
     );
   }
@@ -381,22 +529,87 @@ const CandidateCard = memo(function CandidateCard({
       testID={`review-card-${c.id}`}
     >
       <Text style={styles.cardTitle}>{c.fileName}</Text>
-      <Text style={styles.meta}>
-        {c.classification?.category ?? 'Unclassified'} · {m.issuer ?? 'Unknown issuer'}
-        {showCover ? ` · ${formatCoverageType(m.coverageType)}` : ''}
-      </Text>
+      <Text style={styles.meta}>{subtitle}</Text>
+      {band === 'low' && !done ? (
+        <Text style={styles.lowBadge}>Not sure — check before approving</Text>
+      ) : null}
       {!done ? (
         <Text style={styles.dest}>
           {storageMode === 'gmail_index' ? 'Will index: ' : 'Will save to: '}
           {dest}
         </Text>
       ) : null}
-      {subjectDisplay ? <Text style={styles.meta}>Subject: {subjectDisplay}</Text> : null}
-      {c.saveError ? (
+      {ui.state === 'error' || c.saveError ? (
         <View style={styles.errorBox}>
-          <Text style={styles.errorText}>Couldn&apos;t save to Drive: {c.saveError}</Text>
+          <Text style={styles.errorText}>{ui.state === 'error' ? ui.message : c.saveError}</Text>
         </View>
       ) : null}
+      {ui.state === 'saving' ? (
+        <View style={styles.actions}>
+          <ActivityIndicator color={colors.teal} />
+          <Text style={styles.meta}>Saving…</Text>
+        </View>
+      ) : null}
+      {ui.state === 'saved' ? (
+        <Text style={[styles.status, styles.statusApproved]}>✓ {ui.message}</Text>
+      ) : null}
+
+      <Pressable onPress={() => setWhy((v) => !v)}>
+        <Text style={styles.whyToggle}>{why ? 'Hide details' : 'Why?'}</Text>
+      </Pressable>
+      {why ? (
+        <View style={styles.whyBox} testID={`why-${c.id}`}>
+          <Text style={styles.meta}>Subject: {c.subject || '—'}</Text>
+          <Text style={styles.meta}>From: {c.from || '—'}</Text>
+          <Text style={styles.meta}>Date: {c.date ? new Date(c.date).toLocaleString() : '—'}</Text>
+          <Text style={styles.meta}>Snippet: {c.previewSnippet || '—'}</Text>
+          <Text style={styles.meta}>
+            Attachment: {c.mimeType} · {(c.sizeBytes || 0).toLocaleString()} bytes
+          </Text>
+          <Text style={styles.meta}>
+            Confidence: {confidenceLabel(band)}
+            {typeof c.classification?.confidence === 'number'
+              ? ` (${Math.round(c.classification.confidence * 100)}%)`
+              : ''}
+          </Text>
+          <Text style={styles.meta}>Reason: {c.classification?.reason || '—'}</Text>
+          {c.classification?.signals?.length ? (
+            <Text style={styles.meta}>Signals: {c.classification.signals.join(' · ')}</Text>
+          ) : null}
+          {c.aiDetail ? (
+            <Text style={styles.meta}>AI detail: {c.aiDetail.summary}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {!done ? (
+        <View style={styles.chipBlock}>
+          <Text style={styles.helper}>Category before approve</Text>
+          <View style={styles.subjectRow}>
+            {VAULT_CATEGORIES.map((cat) => (
+              <Pressable
+                key={cat}
+                disabled={busy}
+                onPress={() => onCategory(cat)}
+                style={[
+                  styles.chip,
+                  (c.categoryOverride || c.classification?.category) === cat && styles.chipActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    (c.categoryOverride || c.classification?.category) === cat && styles.chipTextActive,
+                  ]}
+                >
+                  {cat.includes('/') ? cat.split('/')[1] : cat}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
       {!done && possibleKeys?.length && c.isGroupLatest !== false ? (
         <View style={styles.chipBlock}>
           <Text style={styles.helper}>Group this with:</Text>
@@ -416,16 +629,37 @@ const CandidateCard = memo(function CandidateCard({
           </View>
         </View>
       ) : null}
-      {!done && c.isGroupLatest !== false ? (
+
+      {!done && c.isGroupLatest !== false && ui.state !== 'saving' ? (
         <View style={styles.actions}>
-          <Button title={c.saveError ? 'Retry Approve' : 'Approve'} loading={busy} onPress={onApprove} />
+          <Button
+            title={ui.state === 'error' || c.saveError ? 'Retry Approve' : 'Approve'}
+            disabled={busy}
+            onPress={onApprove}
+          />
           <Button title="Skip" variant="ghost" disabled={busy} onPress={onReject} />
+          <Button title="View email" variant="ghost" disabled={busy} onPress={onViewEmail} />
+          <Button
+            title="Ask AI"
+            variant="ghost"
+            loading={askBusy}
+            disabled={busy}
+            onPress={async () => {
+              setAskBusy(true);
+              try {
+                await onAskAi();
+                setWhy(true);
+              } finally {
+                setAskBusy(false);
+              }
+            }}
+          />
         </View>
-      ) : approved ? (
+      ) : approved && ui.state !== 'saving' ? (
         <Text style={[styles.status, styles.statusApproved]}>
           {storageMode === 'gmail_index' ? 'Approved · saved to vault' : 'Approved · saved to Drive'}
         </Text>
-      ) : done ? (
+      ) : done && !skipped ? (
         <Text style={styles.status}>{c.status}</Text>
       ) : null}
     </View>
@@ -507,6 +741,28 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.teal, fontWeight: '600' },
   status: { ...typography.caption, color: colors.inkMuted, textTransform: 'uppercase' },
   statusApproved: { color: colors.success, textTransform: 'none' },
+  whyToggle: { ...typography.caption, color: colors.teal, fontWeight: '700', marginTop: 4 },
+  whyBox: {
+    backgroundColor: colors.paper,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    gap: 2,
+    marginTop: 4,
+  },
+  lowBadge: {
+    ...typography.caption,
+    color: colors.amber,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  approveAllBar: { gap: 6, marginTop: 4 },
+  barTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.line,
+    overflow: 'hidden',
+  },
+  barFill: { height: 8, backgroundColor: colors.teal },
   toast: {
     position: 'absolute',
     left: spacing.lg,

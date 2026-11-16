@@ -1,5 +1,11 @@
 import { ClassificationResult, DocumentMetadata, VaultCategory } from '../types/document';
 import { normalizeCategory } from './folders';
+import {
+  calibrateConfidence,
+  collectClassificationSignals,
+  ensureClassificationDisplay,
+  looksLikeInternalKey,
+} from './reviewLabels';
 
 const PROMO_PATTERNS = [
   /unsubscribe/i,
@@ -43,6 +49,7 @@ const SENDER_DOMAIN_HINTS: Array<{ test: RegExp; category: VaultCategory }> = [
   { test: /@sbi\.co\.|@onlinesbi\./i, category: 'Banking' },
   { test: /@icicibank\.|@icici\.com/i, category: 'Banking' },
   { test: /@axisbank\./i, category: 'Banking' },
+  { test: /@federalbank\.|@fednet\./i, category: 'Banking' },
   { test: /@bankofbaroda\.|@bobibanking\./i, category: 'Banking' },
   { test: /@kotak\.com/i, category: 'Banking' },
   { test: /@hdfcergo\.|@icicilombard\.|@bajajallianz\./i, category: 'Insurance/Vehicle' },
@@ -59,9 +66,10 @@ const FILENAME_HINTS: Array<{ test: RegExp; category: VaultCategory }> = [
   { test: /form[_\s-]?16/i, category: 'Tax' },
   { test: /26as|itr/i, category: 'Tax' },
   { test: /salary|payslip/i, category: 'Tax' },
+  { test: /term.?loan|credit.?car|auto.?loan|loan.?account|emi/i, category: 'Banking' },
   { test: /bank.*statement|statement.*\d{4}/i, category: 'Banking' },
   { test: /credit.?card/i, category: 'Bills' },
-  { test: /policy|motor|vehicle|chassis/i, category: 'Insurance/Vehicle' },
+  { test: /policy|motor.?insur|vehicle.?insur|chassis/i, category: 'Insurance/Vehicle' },
   { test: /boarding|pnr|ticket/i, category: 'Travel' },
   { test: /invoice|receipt/i, category: 'Warranties' },
   { test: /electricity|bescom|jio|airtel/i, category: 'Bills' },
@@ -123,7 +131,8 @@ export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string
   const normalized = normalizeCategory(haystack);
   const category =
     hintCategory && (normalized === 'Other' || hintCategory !== 'Other') ? hintCategory : normalized;
-  const issuer = extractIssuer(input.from, haystack);
+  let issuer = extractIssuer(input.from, haystack);
+  if (looksLikeInternalKey(issuer)) issuer = undefined;
   const documentType = guessDocumentType(haystack, category);
   const referenceNumber = extractReference(haystack);
   const dates = extractDates(haystack);
@@ -148,30 +157,57 @@ export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string
     expiryDate: dates.expiryDate,
   };
 
-  return {
+  const signals = collectClassificationSignals({
+    from: input.from,
+    subject: input.subject,
+    fileName: input.fileName,
+    snippet: input.snippet,
     category,
-    title,
     metadata,
-    confidence: isImportant ? 0.55 : 0.25,
-    isImportantDocument: isImportant,
-    reason: isImportant
-      ? hintCategory
-        ? 'Matched sender/filename hints and document keywords'
-        : 'Matched document keywords / patterns'
-      : 'Weak document signals',
-  };
+  });
+  const { confidence } = calibrateConfidence({
+    baseConfidence: isImportant ? 0.55 : 0.25,
+    signals,
+    category,
+    hasDocumentHint: DOC_HINT_PATTERNS.some((re) => re.test(haystack)),
+  });
+
+  return ensureClassificationDisplay(
+    {
+      category,
+      title,
+      metadata,
+      confidence,
+      isImportantDocument: isImportant,
+      reason: isImportant
+        ? hintCategory
+          ? 'Matched sender/filename hints and document keywords'
+          : 'Matched document keywords / patterns'
+        : 'Weak document signals — check before approving',
+      signals,
+    },
+    {
+      from: input.from,
+      subject: input.subject,
+      fileName: input.fileName,
+      snippet: input.snippet,
+    },
+  );
 }
 
 export function mergeClassification(
   base: ClassificationResult,
   override: Partial<ClassificationResult> & { metadata?: DocumentMetadata },
+  ctx?: { from?: string; subject?: string; fileName?: string; snippet?: string },
 ): ClassificationResult {
-  return {
+  const merged: ClassificationResult = {
     ...base,
     ...override,
     category: (override.category as VaultCategory) ?? base.category,
     metadata: { ...base.metadata, ...override.metadata },
+    signals: override.signals?.length ? override.signals : base.signals,
   };
+  return ensureClassificationDisplay(merged, ctx);
 }
 
 function extractIssuer(from?: string, haystack?: string): string | undefined {

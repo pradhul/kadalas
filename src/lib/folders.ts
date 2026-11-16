@@ -52,9 +52,14 @@ export function normalizeCategory(raw: string | undefined | null): VaultCategory
   const lower = cleaned.toLowerCase();
 
   const rules: Array<{ test: RegExp; category: VaultCategory }> = [
-    // Vehicle — include Indian OD/TP wording before generic "insurance"
+    // Loans / credit products before vehicle (avoid TermLoans.CreditCar → vehicle)
     {
-      test: /vehicle|motor|car\s*insur|two.?wheeler|rc\s*book|puc\b|\bod\b|\btp\b|third\s*party|own\s*damage|chassis|registration\s*certificate/i,
+      test: /term\s*loan|credit\s*car|autoloan|auto\s*loan|personal\s*loan|home\s*loan|emi\s*schedule|loan\s*account/i,
+      category: 'Banking',
+    },
+    // Vehicle — require clear motor/insurance wording (not bare "Car" in product codes)
+    {
+      test: /vehicle\s*insur|motor\s*insur|car\s*insur|two.?wheeler|rc\s*book|puc\b|third\s*party|own\s*damage|chassis|registration\s*certificate|\bcomprehensive\s*policy\b/i,
       category: 'Insurance/Vehicle',
     },
     {
@@ -69,7 +74,7 @@ export function normalizeCategory(raw: string | undefined | null): VaultCategory
     { test: /insur/, category: 'Insurance/Health' },
   // Banking & credit
   {
-    test: /bank\s*of\s*baroda|\bbob\b|hdfc|state\s*bank|\bsbi\b|icici|axis\s*bank|kotak|yes\s*bank|indusind|canara\s*bank|punjab\s*national|\bpnb\b/,
+    test: /federal\s*bank|bank\s*of\s*baroda|\bbob\b|hdfc|state\s*bank|\bsbi\b|icici|axis\s*bank|kotak|yes\s*bank|indusind|canara\s*bank|punjab\s*national|\bpnb\b/,
     category: 'Banking',
   },
     { test: /bank\s*statement|account\s*statement|passbook|loan\s*statement|neft|imps|upi\s*statement/, category: 'Banking' },
