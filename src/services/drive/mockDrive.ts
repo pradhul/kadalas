@@ -9,6 +9,7 @@ import {
   VaultIndex,
 } from '../../types/document';
 import { MOCK_VAULT_INDEX } from '../../mocks/data';
+import { OrganizeUndoState } from '../../types/organize';
 import { ReviewState } from '../../types/review';
 import { ScanJobState } from '../../types/scan';
 import { DriveFileRef, DriveService, UploadInput } from './types';
@@ -22,6 +23,7 @@ interface MockState {
   index: VaultIndex;
   scanState: ScanJobState | null;
   reviewState: ReviewState | null;
+  organizeUndo: OrganizeUndoState | null;
 }
 
 function emptyState(): MockState {
@@ -48,6 +50,7 @@ function emptyState(): MockState {
     vaultFolderId,
     folderIdsByPath,
     reviewState: null,
+    organizeUndo: null,
     files: {
       mock_index: {
         id: 'mock_index',
@@ -69,6 +72,7 @@ function loadState(): MockState {
       try {
         const parsed = JSON.parse(raw) as Partial<MockState> & MockState;
         if (parsed.reviewState === undefined) parsed.reviewState = null;
+        if (parsed.organizeUndo === undefined) parsed.organizeUndo = null;
         return parsed as MockState;
       } catch {
         // fall through
@@ -136,9 +140,14 @@ export function createMockDriveService(): DriveService {
       return file;
     },
 
-    async moveFile(fileId, newParentId) {
+    async getFileParentId(fileId) {
+      return memory.files[fileId]?.parentId;
+    },
+
+    async moveFile(fileId, newParentId, oldParentId) {
       const file = memory.files[fileId];
       if (file) {
+        void oldParentId;
         file.parentId = newParentId;
         saveState(memory);
       }
@@ -193,6 +202,15 @@ export function createMockDriveService(): DriveService {
 
     async loadReviewState() {
       return memory.reviewState ? structuredClone(memory.reviewState) : null;
+    },
+
+    async saveOrganizeUndo(state) {
+      memory.organizeUndo = structuredClone(state);
+      saveState(memory);
+    },
+
+    async loadOrganizeUndo() {
+      return memory.organizeUndo ? structuredClone(memory.organizeUndo) : null;
     },
   };
 }

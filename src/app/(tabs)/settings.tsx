@@ -14,7 +14,18 @@ import {
   isWebStorageWarningNeeded,
   saveAiApiKey,
 } from '../../services/secureStorage';
-import { AiProviderId, AiUsageStats } from '../../types/document';
+import { AiProviderId, AiUsageStats, VaultCategory } from '../../types/document';
+import { categoryLabel } from '../../lib/folders';
+import {
+  applyMoves,
+  hasOrganizeUndo,
+  proposeMoves,
+  ProposedMove,
+  undoLastOrganize,
+} from '../../lib/organizeDrive';
+import { useVault } from '../../context/VaultContext';
+import { getDriveService } from '../../services/drive';
+import { loadOrganizeUndo, saveOrganizeUndo } from '../../services/organizePersist';
 
 async function openExternal(url: string) {
   if (Platform.OS === 'web') {
@@ -26,6 +37,7 @@ async function openExternal(url: string) {
 
 export default function SettingsScreen() {
   const { session, signOut, isMock } = useAuth();
+  const { documents, index, refresh } = useVault();
   const { width } = useWindowDimensions();
   const [provider, setProvider] = useState<AiProviderId>('gemini');
   const [apiKey, setApiKey] = useState('');
@@ -34,6 +46,10 @@ export default function SettingsScreen() {
   const [hasKey, setHasKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [organizePreview, setOrganizePreview] = useState<ProposedMove[] | null>(null);
+  const [organizeBusy, setOrganizeBusy] = useState(false);
+  const [organizeMessage, setOrganizeMessage] = useState<string | null>(null);
+  const [canUndoOrganize, setCanUndoOrganize] = useState(false);
 
   const selected = useMemo(
     () => AI_PROVIDER_OPTIONS.find((o) => o.id === provider) ?? AI_PROVIDER_OPTIONS[0],
@@ -50,6 +66,9 @@ export default function SettingsScreen() {
       setHasKey(await ai.hasApiKey());
       const existing = await getAiApiKey(ai.getProviderId());
       if (existing) setApiKey(existing);
+      const drive = getDriveService();
+      const undoLocal = await loadOrganizeUndo();
+      setCanUndoOrganize(undoLocal.moves.length > 0 || (await hasOrganizeUndo(drive)));
     })();
     return unsub;
   }, []);
@@ -216,6 +235,101 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.card}>
+            <Text style={styles.label}>Organize Drive</Text>
+            <Text style={styles.meta}>
+              Move vault files into the correct Kadalas category folders (add/remove parents only — files are never
+              deleted). Preview first, then confirm.
+            </Text>
+            <View style={[styles.row, compact && styles.rowWrap, { marginTop: spacing.sm }]}>
+              <Button
+                title={organizeBusy ? 'Working…' : 'Organize Drive'}
+                variant="secondary"
+                loading={organizeBusy}
+                onPress={() => {
+                  setOrganizeMessage(null);
+                  const moves = proposeMoves(documents);
+                  setOrganizePreview(moves);
+                  if (!moves.length) {
+                    setOrganizeMessage('All vault files already match their category folders.');
+                  }
+                }}
+              />
+              <Button
+                title="Undo last organize"
+                variant="ghost"
+                disabled={!canUndoOrganize || organizeBusy || !index}
+                onPress={async () => {
+                  if (!index) return;
+                  setOrganizeBusy(true);
+                  setOrganizeMessage(null);
+                  try {
+                    const drive = getDriveService();
+                    const { restored } = await undoLastOrganize(drive, index);
+                    await refresh();
+                    setOrganizePreview(null);
+                    setCanUndoOrganize(
+                      (await loadOrganizeUndo()).moves.length > 0 ||
+                        (await hasOrganizeUndo(drive)),
+                    );
+                    setOrganizeMessage(
+                      restored ? `Restored ${restored} file(s) to their prior folders.` : 'Nothing to undo.',
+                    );
+                  } catch (e) {
+                    setOrganizeMessage(e instanceof Error ? e.message : 'Undo failed');
+                  } finally {
+                    setOrganizeBusy(false);
+                  }
+                }}
+              />
+            </View>
+            {organizeMessage ? <Banner tone="info">{organizeMessage}</Banner> : null}
+            {organizePreview && organizePreview.length > 0 ? (
+              <View style={styles.previewBlock}>
+                <Text style={styles.meta}>
+                  {organizePreview.length} file{organizePreview.length === 1 ? '' : 's'} to move
+                </Text>
+                {organizePreview.map((m) => (
+                  <View key={m.docId} style={styles.previewRow}>
+                    <Text style={styles.previewTitle} numberOfLines={1}>
+                      {documents.find((d) => d.id === m.docId)?.title ?? m.docId}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={2}>
+                      {m.fromPath} → {categoryLabel(m.toCategory as VaultCategory)} — {m.reason}
+                    </Text>
+                  </View>
+                ))}
+                <Button
+                  title="Confirm organize"
+                  loading={organizeBusy}
+                  onPress={async () => {
+                    if (!index || !organizePreview.length) return;
+                    setOrganizeBusy(true);
+                    setOrganizeMessage(null);
+                    try {
+                      const drive = getDriveService();
+                      const { applied, undo } = await applyMoves(drive, index, organizePreview);
+                      await saveOrganizeUndo(undo);
+                      await refresh();
+                      setOrganizePreview(null);
+                      setCanUndoOrganize(true);
+                      setOrganizeMessage(`Moved ${applied} file(s). You can undo once from here.`);
+                    } catch (e) {
+                      setOrganizeMessage(e instanceof Error ? e.message : 'Organize failed');
+                    } finally {
+                      setOrganizeBusy(false);
+                    }
+                  }}
+                />
+                <Button
+                  title="Cancel preview"
+                  variant="ghost"
+                  onPress={() => setOrganizePreview(null)}
+                />
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.card}>
             <Text style={styles.label}>Scopes & privacy</Text>
             <Text style={styles.meta}>
               gmail.readonly (restricted — Google verification required before public OAuth). drive.file (app-created
@@ -284,4 +398,12 @@ const styles = StyleSheet.create({
   linkHint: { ...typography.caption, color: colors.inkMuted },
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', marginBottom: spacing.md, flexWrap: 'wrap' },
   rowWrap: { flexDirection: 'column', alignItems: 'stretch' },
+  previewBlock: { marginTop: spacing.md, gap: spacing.sm },
+  previewRow: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: spacing.sm,
+    gap: 2,
+  },
+  previewTitle: { ...typography.caption, color: colors.ink, fontWeight: '600' },
 });

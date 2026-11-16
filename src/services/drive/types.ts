@@ -1,4 +1,5 @@
 import { VaultCategory, VaultDocument, VaultIndex } from '../../types/document';
+import { OrganizeUndoState } from '../../types/organize';
 import { ReviewState } from '../../types/review';
 import { ScanJobState } from '../../types/scan';
 
@@ -27,6 +28,7 @@ export interface DriveService {
   saveIndex(index: VaultIndex): Promise<void>;
   uploadFile(input: UploadInput): Promise<DriveFileRef>;
   moveFile(fileId: string, newParentId: string, oldParentId?: string): Promise<void>;
+  getFileParentId(fileId: string): Promise<string | undefined>;
   renameFile(fileId: string, newName: string): Promise<void>;
   getDownloadUrl(fileId: string): Promise<string>;
   getFolderIdForCategory(category: VaultCategory): Promise<string>;
@@ -38,4 +40,7 @@ export interface DriveService {
   /** Overwrite-only review queue + skipped ids (never trash). */
   saveReviewState(state: ReviewState): Promise<void>;
   loadReviewState(): Promise<ReviewState | null>;
+  /** Overwrite-only organize undo blob (never trash). */
+  saveOrganizeUndo(state: OrganizeUndoState): Promise<void>;
+  loadOrganizeUndo(): Promise<OrganizeUndoState | null>;
 }

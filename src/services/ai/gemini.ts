@@ -1,3 +1,4 @@
+import { CATEGORY_GUIDANCE_TEXT } from '../../lib/categoryGuidance';
 import { classifyWithRules, mergeClassification } from '../../lib/categorisation';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { normalizeCategory } from '../../lib/folders';
@@ -109,17 +110,18 @@ export function createGeminiProvider(getApiKey: () => Promise<string | null>): A
         });
       }
 
-      const prompt = `You are a classifier for Kadalas, a personal papers vault.
+      const prompt = `You are a classifier for Kadalas, a personal papers vault (India-first, also works globally).
 Return ONLY JSON with keys:
-category (one of: Insurance/Vehicle, Insurance/Health, Insurance/Home, Insurance/Life, Banking, Tax, Identity, Bills, Warranties, Travel, Other),
-title (clean short title),
-issuer, documentType, referenceNumber, holderName, issueDate (YYYY-MM-DD), expiryDate (YYYY-MM-DD),
+category, title, issuer, documentType, referenceNumber, holderName, issueDate (YYYY-MM-DD), expiryDate (YYYY-MM-DD),
 registrationNumber, chassisNumber, engineNumber, vehicleMakeModel,
 propertyAddress, deviceSerial,
 isImportantDocument (boolean), confidence (0-1), reason (short).
+
+${CATEGORY_GUIDANCE_TEXT}
+
 Rules:
-- Set registrationNumber / chassisNumber ONLY when that exact identifier is clearly visible in the document or email text. Never invent, guess, or use placeholder plates.
-- For non-vehicle categories (Banking, Health, Tax, etc.) leave registrationNumber empty.
+- Set registrationNumber / chassisNumber ONLY when that exact identifier is clearly visible in the document or email text. Never invent, guess, or use placeholder or example plates.
+- For non-vehicle categories leave registrationNumber empty.
 - For vehicle documents, extract the plate when visible — policy numbers change on renewal.
 - Skip promos/newsletters (isImportantDocument=false).`;
 
