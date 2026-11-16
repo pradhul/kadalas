@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2026-11-16
+
+### Fixed
+
+- **Home / My documents phone layout** — header (tiles, Drive note, Scan CTA, search, chips) was a sibling above FlatList and ate the viewport on ~390px screens (one card visible). Compact fixed chrome + `SectionList` `flex:1` dense rows (~64px); category chips one-line horizontal scroll; collapsible section headers.
+- Same nested-scroll pattern fixed on Review, Search, folder Vault, and Expiring (`ListHeaderComponent` + `flex:1` list).
+
+### Changed
+
+- Version bump to **0.1.12**
+
 ## [0.1.11] - 2026-11-16
 
 ### Fixed
@@ -224,6 +235,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.12]: https://github.com/pradhul/kadalas/releases/tag/v0.1.12
 [0.1.11]: https://github.com/pradhul/kadalas/releases/tag/v0.1.11
 [0.1.10]: https://github.com/pradhul/kadalas/releases/tag/v0.1.10
 [0.1.9]: https://github.com/pradhul/kadalas/releases/tag/v0.1.9

@@ -147,12 +147,7 @@ export function groupVaultList(items: VaultListItem[]): Array<{
   count: number;
   items: VaultListItem[];
 }> {
-  const recent = items.slice(0, 8);
   const groups: Array<{ id: string; label: string; count: number; items: VaultListItem[] }> = [];
-  if (recent.length) {
-    groups.push({ id: 'recent', label: 'Recent', count: recent.length, items: recent });
-  }
-
   const claimed = new Set<string>();
   const take = (id: string, label: string, pick: (i: VaultListItem) => boolean) => {
     const inGroup = items.filter((i) => !claimed.has(i.id) && pick(i));
@@ -160,6 +155,12 @@ export function groupVaultList(items: VaultListItem[]): Array<{
     for (const i of inGroup) claimed.add(i.id);
     groups.push({ id, label, count: inGroup.length, items: inGroup });
   };
+
+  // Recent is a short preview of newest docs; they still appear again under their category.
+  const recent = items.slice(0, 6);
+  if (recent.length) {
+    groups.push({ id: 'recent', label: 'Recent', count: recent.length, items: recent });
+  }
 
   // Soft groups first so Salary/Medical don't drown in Tax / Insurance
   take('Salary', 'Salary', matchesSalary);

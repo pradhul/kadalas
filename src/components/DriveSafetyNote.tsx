@@ -29,7 +29,7 @@ export function DriveSafetyNote({
         Everything you approve is saved in your Google Drive (Kadalas folder). Closing the app is safe.
       </Text>
       {typeof documentCount === 'number' ? (
-        <Text style={styles.meta} testID="vault-doc-count">
+        <Text style={styles.meta} testID="vault-index-doc-count">
           {documentCount} document{documentCount === 1 ? '' : 's'} in your vault
         </Text>
       ) : null}

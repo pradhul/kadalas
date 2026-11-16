@@ -12,13 +12,21 @@ export default function SearchScreen() {
 
   return (
     <Screen>
-      <View style={styles.pad}>
-        <Field label="Search" value={query} onChangeText={setQuery} placeholder="Title, issuer, reference…" />
-      </View>
       <FlatList
+        style={styles.listFlex}
         data={results}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          <View style={styles.pad}>
+            <Field
+              label="Search"
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Title, issuer, reference…"
+            />
+          </View>
+        }
         ListEmptyComponent={
           query ? (
             <EmptyState title="No matches" body="Try another issuer, reference number, or keyword." />
@@ -29,8 +37,10 @@ export default function SearchScreen() {
         renderItem={({ item }) => (
           <Pressable style={styles.row} onPress={() => router.push(`/document/${item.id}`)}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.meta}>
+              <Text style={styles.title} numberOfLines={1}>
+                {item.title}
+              </Text>
+              <Text style={styles.meta} numberOfLines={1}>
                 {item.category.replace('/', ' · ')}
                 {item.metadata.referenceNumber ? ` · ${item.metadata.referenceNumber}` : ''}
               </Text>
@@ -44,13 +54,15 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
+  listFlex: { flex: 1 },
   pad: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  list: { padding: spacing.lg, paddingTop: 0 },
+  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
   row: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: 14,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },

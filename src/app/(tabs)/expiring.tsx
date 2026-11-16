@@ -75,16 +75,19 @@ export default function ExpiringScreen() {
   return (
     <Screen>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.header}>
-          <SectionTitle
-            title="Expiring soon"
-            subtitle="Per-slot vehicle gaps/expiries plus other renewals in the next 60 days."
-          />
-        </View>
         <FlatList
+          style={styles.listFlex}
           data={items}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            <View style={styles.header}>
+              <SectionTitle
+                title="Expiring soon"
+                subtitle="Per-slot vehicle gaps/expiries plus other renewals in the next 60 days."
+              />
+            </View>
+          }
           ListEmptyComponent={
             <EmptyState
               title="Nothing due soon"
@@ -93,9 +96,13 @@ export default function ExpiringScreen() {
           }
           renderItem={({ item }) => (
             <Pressable style={styles.row} onPress={() => router.push(item.href as never)}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={styles.title}>{item.title}</Text>
-                <Text style={styles.meta}>{item.meta}</Text>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {item.meta}
+                </Text>
               </View>
               <Chip
                 label={
@@ -117,9 +124,11 @@ export default function ExpiringScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  listFlex: { flex: 1 },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  list: { padding: spacing.lg, paddingTop: 0, gap: spacing.sm },
+  list: { padding: spacing.lg, paddingTop: 0, gap: spacing.sm, flexGrow: 1 },
   row: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
@@ -127,7 +136,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.line,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
     marginBottom: spacing.sm,
   },
   title: { ...typography.bodyStrong, color: colors.ink },

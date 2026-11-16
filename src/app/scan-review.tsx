@@ -288,98 +288,97 @@ export default function ScanReviewScreen() {
     );
   }
 
+  const reviewHeader = (
+    <View style={styles.header} testID="review-list-header">
+      <Pressable onPress={() => router.back()}>
+        <Text style={styles.back}>← Back</Text>
+      </Pressable>
+      <SectionTitle
+        title="Review scan results"
+        subtitle={`${localStats.toReview} to review · ${localStats.approved} approved · ${localStats.skipped} skipped`}
+      />
+      <Banner>
+        {storageMode === 'gmail_index'
+          ? 'Approve indexes the Gmail attachment in your vault (no Drive upload). Opening it later fetches from Gmail. Skip ignores it and will not suggest it again.'
+          : 'Approve copies the attachment into your Google Drive › Kadalas folder (by category) and adds it to your vault. Skip ignores it and will not suggest it again.'}
+      </Banner>
+      <DriveSafetyNote vaultFolderUrl={vaultFolderUrl} lastSyncedAt={lastSyncedAt} compact />
+      <TextInput
+        value={searchInput}
+        onChangeText={setSearchInput}
+        placeholder="Search filename, subject, sender, category…"
+        placeholderTextColor={colors.inkMuted}
+        style={styles.search}
+        testID="review-search"
+        autoCorrect={false}
+        autoCapitalize="none"
+      />
+      <View style={styles.toggleRow}>
+        <Text style={styles.toggleLabel}>Show skipped</Text>
+        <Switch
+          value={showSkipped}
+          onValueChange={setShowSkipped}
+          trackColor={{ true: colors.teal, false: colors.line }}
+          testID="show-skipped-toggle"
+        />
+      </View>
+      <View style={styles.batchRow}>
+        <Button
+          title={
+            searchQuery.trim()
+              ? `Approve all ${matchingPending.length} matching`
+              : `Approve all ${matchingPending.length}`
+          }
+          variant="secondary"
+          onPress={() => void handleApproveAll()}
+          disabled={Boolean(approveAll) || matchingPending.length === 0}
+        />
+        <Button
+          title={
+            searchQuery.trim()
+              ? `Skip all ${matchingPending.length} matching`
+              : `Skip all ${matchingPending.length}`
+          }
+          variant="ghost"
+          onPress={() => void handleSkipAllMatching()}
+          disabled={Boolean(approveAll) || matchingPending.length === 0}
+        />
+      </View>
+      {skipBatch?.length ? (
+        <Button
+          title={`Undo skip (${skipBatch.length})`}
+          variant="ghost"
+          onPress={() => void handleUndoSkipBatch()}
+        />
+      ) : null}
+      {approveAll ? (
+        <View style={styles.approveAllBar} testID="approve-all-progress">
+          <Text style={styles.meta}>
+            Approving {approveAll.done}/{approveAll.total}
+          </Text>
+          <View style={styles.barTrack}>
+            <View
+              style={[
+                styles.barFill,
+                { width: `${Math.round((approveAll.done / Math.max(approveAll.total, 1)) * 100)}%` },
+              ]}
+            />
+          </View>
+        </View>
+      ) : null}
+      {error || renderError ? <Banner tone="warn">{error || renderError}</Banner> : null}
+    </View>
+  );
+
   return (
     <Screen>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()}>
-            <Text style={styles.back}>← Back</Text>
-          </Pressable>
-          <SectionTitle
-            title="Review scan results"
-            subtitle={`${localStats.toReview} to review · ${localStats.approved} approved · ${localStats.skipped} skipped`}
-          />
-          <Banner>
-            {storageMode === 'gmail_index'
-              ? 'Approve indexes the Gmail attachment in your vault (no Drive upload). Opening it later fetches from Gmail. Skip ignores it and will not suggest it again.'
-              : 'Approve copies the attachment into your Google Drive › Kadalas folder (by category) and adds it to your vault. Skip ignores it and will not suggest it again.'}
-          </Banner>
-          <DriveSafetyNote
-            vaultFolderUrl={vaultFolderUrl}
-            lastSyncedAt={lastSyncedAt}
-            compact
-          />
-          <TextInput
-            value={searchInput}
-            onChangeText={setSearchInput}
-            placeholder="Search filename, subject, sender, category…"
-            placeholderTextColor={colors.inkMuted}
-            style={styles.search}
-            testID="review-search"
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Show skipped</Text>
-            <Switch
-              value={showSkipped}
-              onValueChange={setShowSkipped}
-              trackColor={{ true: colors.teal, false: colors.line }}
-              testID="show-skipped-toggle"
-            />
-          </View>
-          <View style={styles.batchRow}>
-            <Button
-              title={
-                searchQuery.trim()
-                  ? `Approve all ${matchingPending.length} matching`
-                  : `Approve all ${matchingPending.length}`
-              }
-              variant="secondary"
-              onPress={() => void handleApproveAll()}
-              disabled={Boolean(approveAll) || matchingPending.length === 0}
-            />
-            <Button
-              title={
-                searchQuery.trim()
-                  ? `Skip all ${matchingPending.length} matching`
-                  : `Skip all ${matchingPending.length}`
-              }
-              variant="ghost"
-              onPress={() => void handleSkipAllMatching()}
-              disabled={Boolean(approveAll) || matchingPending.length === 0}
-            />
-          </View>
-          {skipBatch?.length ? (
-            <Button
-              title={`Undo skip (${skipBatch.length})`}
-              variant="ghost"
-              onPress={() => void handleUndoSkipBatch()}
-            />
-          ) : null}
-          {approveAll ? (
-            <View style={styles.approveAllBar} testID="approve-all-progress">
-              <Text style={styles.meta}>
-                Approving {approveAll.done}/{approveAll.total}
-              </Text>
-              <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.barFill,
-                    { width: `${Math.round((approveAll.done / Math.max(approveAll.total, 1)) * 100)}%` },
-                  ]}
-                />
-              </View>
-            </View>
-          ) : null}
-        </View>
-
-        {error || renderError ? <Banner tone="warn">{error || renderError}</Banner> : null}
-
         <FlatList
+          style={styles.listFlex}
           data={groups}
           keyExtractor={(g) => g.id}
           contentContainerStyle={styles.list}
+          ListHeaderComponent={reviewHeader}
           ListEmptyComponent={
             <View style={{ gap: 8 }}>
               <Banner>
@@ -735,9 +734,10 @@ const CandidateCard = memo(function CandidateCard({
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  listFlex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm },
-  back: { ...typography.caption, color: colors.teal, marginBottom: spacing.sm },
+  header: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: 6 },
+  back: { ...typography.caption, color: colors.teal, marginBottom: 4 },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -745,7 +745,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   toggleLabel: { ...typography.body, color: colors.ink },
-  list: { padding: spacing.lg, gap: spacing.md, paddingBottom: 96 },
+  list: { paddingHorizontal: spacing.md, gap: spacing.sm, paddingBottom: 96, flexGrow: 1 },
   group: {
     borderWidth: 1,
     borderColor: colors.line,

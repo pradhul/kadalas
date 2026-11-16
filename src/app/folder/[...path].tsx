@@ -39,6 +39,7 @@ export default function FolderScreen() {
   return (
     <Screen>
       <FlatList
+        style={styles.listFlex}
         data={docs}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
@@ -59,8 +60,10 @@ export default function FolderScreen() {
         renderItem={({ item }) => (
           <Pressable style={styles.row} onPress={() => router.push(`/document/${item.id}`)}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.meta}>
+              <Text style={styles.title} numberOfLines={1}>
+                {item.title}
+              </Text>
+              <Text style={styles.meta} numberOfLines={1}>
                 {(item.category as VaultCategory).replace('/', ' · ')}
                 {item.metadata.referenceNumber ? ` · ${item.metadata.referenceNumber}` : ''}
               </Text>
@@ -74,7 +77,8 @@ export default function FolderScreen() {
 }
 
 const styles = StyleSheet.create({
-  list: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  listFlex: { flex: 1 },
+  list: { padding: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
   children: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.lg },
   child: {
     paddingHorizontal: 12,
@@ -84,10 +88,11 @@ const styles = StyleSheet.create({
   },
   childText: { ...typography.caption, color: colors.teal, fontFamily: 'DMSans_600SemiBold' },
   row: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: 14,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
