@@ -14,7 +14,16 @@ import { ReviewState } from '../../types/review';
 import { REVIEW_STATE_FILENAME } from '../../types/review';
 import { SCAN_STATE_FILENAME, ScanJobState } from '../../types/scan';
 import { getAuthService } from '../auth';
+import {
+  loadIndexMirror,
+  loadPreferredIndexFileId,
+  loadPreferredVaultFolderId,
+  saveIndexMirror,
+  savePreferredIndexFileId,
+  savePreferredVaultFolderId,
+} from '../indexMirror';
 import { DriveFileRef, DriveService, UploadInput } from './types';
+import { createVaultIndexStore, VaultIndexDriveApi } from './vaultIndexStore';
 
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
@@ -74,16 +83,33 @@ async function ensureFolder(name: string, parentId?: string): Promise<string> {
 }
 
 export function createGoogleDriveService(): DriveService {
-  let cache: { vaultFolderId: string; folderIdsByPath: Record<string, string>; indexFileId?: string } | null =
-    null;
+  let cache: { vaultFolderId: string; folderIdsByPath: Record<string, string> } | null = null;
 
   async function ensureRootFolder(): Promise<string> {
+    // Prefer stored folder id (survives reload under drive.file)
+    const preferred = await loadPreferredVaultFolderId();
+    if (preferred) {
+      try {
+        await driveFetch(`${DRIVE}/files/${preferred}?fields=id,trashed`);
+        return preferred;
+      } catch {
+        // fall through to name search / create
+      }
+    }
     // Prefer existing "Kadalas"; fall back to legacy "Document Vault" for upgrades
     const modern = await findFolder(VAULT_ROOT_FOLDER);
-    if (modern) return modern;
+    if (modern) {
+      await savePreferredVaultFolderId(modern);
+      return modern;
+    }
     const legacy = await findFolder(LEGACY_VAULT_ROOT_FOLDER);
-    if (legacy) return legacy;
-    return createFolder(VAULT_ROOT_FOLDER);
+    if (legacy) {
+      await savePreferredVaultFolderId(legacy);
+      return legacy;
+    }
+    const created = await createFolder(VAULT_ROOT_FOLDER);
+    await savePreferredVaultFolderId(created);
+    return created;
   }
 
   async function ensureStructure() {
@@ -112,12 +138,84 @@ export function createGoogleDriveService(): DriveService {
     return cache;
   }
 
-  async function findIndexFile(vaultFolderId: string): Promise<string | null> {
-    const q = `name = '${INDEX_FILENAME}' and '${vaultFolderId}' in parents and trashed = false`;
-    const res = await driveFetch(`${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`);
-    const data = (await res.json()) as { files?: Array<{ id: string }> };
-    return data.files?.[0]?.id ?? null;
-  }
+  const indexApi: VaultIndexDriveApi = {
+    async listIndexFiles(vaultFolderId: string) {
+      // List ALL duplicates (drive.file can create many). Never pageSize=1.
+      const q = `name = '${INDEX_FILENAME.replace(/'/g, "\\'")}' and '${vaultFolderId}' in parents and trashed = false`;
+      const files: Array<{ id: string; modifiedTime: string }> = [];
+      let pageToken: string | undefined;
+      do {
+        const url =
+          `${DRIVE}/files?q=${encodeURIComponent(q)}` +
+          `&fields=nextPageToken,files(id,modifiedTime)` +
+          `&orderBy=modifiedTime desc&pageSize=100` +
+          (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+        const res = await driveFetch(url);
+        const data = (await res.json()) as {
+          files?: Array<{ id: string; modifiedTime?: string }>;
+          nextPageToken?: string;
+        };
+        for (const f of data.files || []) {
+          files.push({
+            id: f.id,
+            modifiedTime: f.modifiedTime || '1970-01-01T00:00:00.000Z',
+          });
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+      return files;
+    },
+
+    async readIndexFile(fileId: string) {
+      const res = await driveFetch(`${DRIVE}/files/${fileId}?alt=media`);
+      return (await res.json()) as VaultIndex;
+    },
+
+    async createIndexFile(vaultFolderId: string, body: string) {
+      const metadata = {
+        name: INDEX_FILENAME,
+        parents: [vaultFolderId],
+        mimeType: 'application/json',
+      };
+      const form = buildMultipart(metadata, body, 'application/json');
+      const res = await driveFetch(
+        `${UPLOAD}/files?uploadType=multipart&fields=id,modifiedTime`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
+          body: form.body,
+        },
+      );
+      const data = (await res.json()) as { id: string; modifiedTime?: string };
+      return {
+        id: data.id,
+        modifiedTime: data.modifiedTime || new Date().toISOString(),
+      };
+    },
+
+    async updateIndexFile(fileId: string, body: string) {
+      const res = await driveFetch(`${UPLOAD}/files/${fileId}?uploadType=media&fields=id,modifiedTime`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      const data = (await res.json()) as { modifiedTime?: string };
+      return { modifiedTime: data.modifiedTime || new Date().toISOString() };
+    },
+  };
+
+  const indexStore = createVaultIndexStore({
+    api: indexApi,
+    ids: {
+      getPreferredFileId: loadPreferredIndexFileId,
+      setPreferredFileId: savePreferredIndexFileId,
+    },
+    mirror: {
+      load: loadIndexMirror,
+      save: saveIndexMirror,
+    },
+    mode: 'fixed',
+  });
 
   return {
     async ensureVaultStructure() {
@@ -127,51 +225,12 @@ export function createGoogleDriveService(): DriveService {
 
     async loadIndex() {
       const s = await ensureStructure();
-      const indexFileId = s.indexFileId || (await findIndexFile(s.vaultFolderId));
-      if (!indexFileId) {
-        const empty: VaultIndex = {
-          version: 1,
-          vaultFolderId: s.vaultFolderId,
-          lastScanAt: null,
-          documents: [],
-          updatedAt: new Date().toISOString(),
-          settings: { storageMode: 'gmail_index' },
-        };
-        return empty;
-      }
-      s.indexFileId = indexFileId;
-      const res = await driveFetch(`${DRIVE}/files/${indexFileId}?alt=media`);
-      return (await res.json()) as VaultIndex;
+      return indexStore.loadIndex(s.vaultFolderId);
     },
 
     async saveIndex(index: VaultIndex) {
       const s = await ensureStructure();
-      const body = JSON.stringify(index, null, 2);
-      let indexFileId = s.indexFileId || (await findIndexFile(s.vaultFolderId));
-
-      if (!indexFileId) {
-        const metadata = {
-          name: INDEX_FILENAME,
-          parents: [s.vaultFolderId],
-          mimeType: 'application/json',
-        };
-        const form = buildMultipart(metadata, body, 'application/json');
-        const res = await driveFetch(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
-          method: 'POST',
-          headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
-          body: form.body,
-        });
-        const data = (await res.json()) as { id: string };
-        s.indexFileId = data.id;
-        return;
-      }
-
-      const res = await driveFetch(`${UPLOAD}/files/${indexFileId}?uploadType=media`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      });
-      await res.json();
+      await indexStore.saveIndex(s.vaultFolderId, index);
     },
 
     async uploadFile(input: UploadInput) {
@@ -255,13 +314,8 @@ export function createGoogleDriveService(): DriveService {
     },
 
     async upsertDocument(doc: VaultDocument) {
-      const index = await this.loadIndex();
-      const idx = index.documents.findIndex((d) => d.id === doc.id);
-      if (idx >= 0) index.documents[idx] = doc;
-      else index.documents.push(doc);
-      index.updatedAt = new Date().toISOString();
-      await this.saveIndex(index);
-      return index;
+      const s = await ensureStructure();
+      return indexStore.upsertDocument(s.vaultFolderId, doc);
     },
 
     async saveScanState(state: ScanJobState | null) {
@@ -372,8 +426,11 @@ export function createGoogleDriveService(): DriveService {
 }
 
 async function findNamedFile(vaultFolderId: string, name: string): Promise<string | null> {
+  // Prefer newest when drive.file left duplicates — never delete the extras.
   const q = `name = '${name.replace(/'/g, "\\'")}' and '${vaultFolderId}' in parents and trashed = false`;
-  const res = await driveFetch(`${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`);
+  const res = await driveFetch(
+    `${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=10`,
+  );
   const data = (await res.json()) as { files?: Array<{ id: string }> };
   return data.files?.[0]?.id ?? null;
 }

@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2026-11-16
+
+### Fixed
+
+- **Root cause (live Gmail-index):** under `drive.file`, each create of `vault-index.json` can leave duplicates; pre-0.1.11 `findIndexFile` used `pageSize=1` with no `orderBy` and no persisted file id, so after reload Home often read an empty/older copy → documents gone and review **Approved 0** (reclaimFalseApprovals). Now: list all duplicates, merge by newest, persist preferred file id locally, never delete duplicates.
+- Index save failures surface a red banner (“Couldn't save your vault list”) with Retry — success only after a successful write.
+- Local index mirror (localStorage) for instant Home paint + reconcile with Drive.
+- Approve awaits review-state flush (`pagehide` / visibility already flushed).
+
+### Added
+
+- Integration test (fake Drive mimicking `drive.file` + appDataFolder 403): buggy arbitrary-first loses 3 approvals after reload; fixed path retains 3 for gmail_index and drive_copy.
+- Review search box (debounced) + Approve all N matching / Skip all matching (with undo).
+
+### Changed
+
+- Version bump to **0.1.11**
+
 ## [0.1.10] - 2026-11-16
 
 ### Fixed
@@ -206,6 +224,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.11]: https://github.com/pradhul/kadalas/releases/tag/v0.1.11
 [0.1.10]: https://github.com/pradhul/kadalas/releases/tag/v0.1.10
 [0.1.9]: https://github.com/pradhul/kadalas/releases/tag/v0.1.9
 [0.1.8]: https://github.com/pradhul/kadalas/releases/tag/v0.1.8

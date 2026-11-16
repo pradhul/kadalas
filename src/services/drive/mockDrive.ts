@@ -12,6 +12,7 @@ import { MOCK_VAULT_INDEX } from '../../mocks/data';
 import { OrganizeUndoState } from '../../types/organize';
 import { ReviewState } from '../../types/review';
 import { ScanJobState } from '../../types/scan';
+import { saveIndexMirror } from '../indexMirror';
 import { DriveFileRef, DriveService, UploadInput } from './types';
 
 const STORAGE_KEY = 'dv_mock_drive_v1';
@@ -122,6 +123,7 @@ export function createMockDriveService(): DriveService {
         content: JSON.stringify(index),
       };
       saveState(memory);
+      await saveIndexMirror(index);
     },
 
     async uploadFile(input: UploadInput) {

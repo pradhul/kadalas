@@ -182,10 +182,32 @@ export function EmptyState({
   );
 }
 
-export function Banner({ children, tone = 'info' }: { children: React.ReactNode; tone?: 'info' | 'warn' }) {
+export function Banner({
+  children,
+  tone = 'info',
+}: {
+  children: React.ReactNode;
+  tone?: 'info' | 'warn' | 'danger';
+}) {
   return (
-    <View style={[styles.banner, tone === 'warn' && styles.bannerWarn]}>
-      <Text style={[styles.caption, { color: tone === 'warn' ? colors.amber : colors.inkMuted }]}>{children}</Text>
+    <View
+      style={[
+        styles.banner,
+        tone === 'warn' && styles.bannerWarn,
+        tone === 'danger' && styles.bannerDanger,
+      ]}
+    >
+      <Text
+        style={[
+          styles.caption,
+          {
+            color:
+              tone === 'danger' ? colors.rose : tone === 'warn' ? colors.amber : colors.inkMuted,
+          },
+        ]}
+      >
+        {children}
+      </Text>
     </View>
   );
 }
@@ -287,6 +309,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   bannerWarn: { backgroundColor: colors.amberSoft },
+  bannerDanger: { backgroundColor: colors.roseSoft },
 });
 
 export type { TextStyle, ViewStyle };

@@ -6,6 +6,7 @@ import {
   Linking,
   StyleSheet,
   Text,
+  TextInput,
   View,
   Pressable,
   Switch,
@@ -27,6 +28,7 @@ import {
   confidenceLabel,
   reviewCardSubtitle,
 } from '../lib/reviewLabels';
+import { filterCandidatesByQuery, pendingApprovable } from '../lib/reviewSearch';
 import {
   formatSubjectSuggestionLabel,
   isVehicleReviewFamily,
@@ -82,8 +84,20 @@ export default function ScanReviewScreen() {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [emailFor, setEmailFor] = useState<ScanCandidate | null>(null);
   const [approveAll, setApproveAll] = useState<{ done: number; total: number } | null>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [skipBatch, setSkipBatch] = useState<string[] | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setSearchQuery(searchInput), 180);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [searchInput]);
 
   const localStats = useMemo(() => {
     const base = reviewStats || { toReview: 0, approved: 0, skipped: 0 };
@@ -105,12 +119,19 @@ export default function ScanReviewScreen() {
 
   const visibleCandidates = useMemo(() => {
     try {
-      if (showSkipped) return lastScanCandidates;
-      return lastScanCandidates.filter((c) => c && c.status !== 'rejected');
+      const base = showSkipped
+        ? lastScanCandidates
+        : lastScanCandidates.filter((c) => c && c.status !== 'rejected');
+      return filterCandidatesByQuery(base, searchQuery);
     } catch {
       return [];
     }
-  }, [lastScanCandidates, showSkipped]);
+  }, [lastScanCandidates, showSkipped, searchQuery]);
+
+  const matchingPending = useMemo(
+    () => pendingApprovable(visibleCandidates),
+    [visibleCandidates],
+  );
 
   const groups: ReviewRow[] = useMemo(() => {
     try {
@@ -224,12 +245,7 @@ export default function ScanReviewScreen() {
   );
 
   const handleApproveAll = useCallback(async () => {
-    const pending = visibleCandidates.filter(
-      (c) =>
-        (c.status === 'pending' || c.status === 'needs_subject_confirm') &&
-        c.isGroupLatest !== false &&
-        !inFlight.current.has(c.id),
-    );
+    const pending = matchingPending.filter((c) => !inFlight.current.has(c.id));
     if (!pending.length) return;
     setApproveAll({ done: 0, total: pending.length });
     let done = 0;
@@ -239,7 +255,25 @@ export default function ScanReviewScreen() {
       setApproveAll({ done, total: pending.length });
     }
     setTimeout(() => setApproveAll(null), 1200);
-  }, [visibleCandidates, handleApprove]);
+  }, [matchingPending, handleApprove]);
+
+  const handleSkipAllMatching = useCallback(async () => {
+    const pending = matchingPending.filter((c) => !inFlight.current.has(c.id));
+    if (!pending.length) return;
+    const ids = pending.map((c) => c.id);
+    setSkipBatch(ids);
+    for (const c of pending) {
+      await handleSkip(c);
+    }
+  }, [matchingPending, handleSkip]);
+
+  const handleUndoSkipBatch = useCallback(async () => {
+    if (!skipBatch?.length) return;
+    for (const id of skipBatch) {
+      await restoreSkippedCandidate(id);
+    }
+    setSkipBatch(null);
+  }, [skipBatch, restoreSkippedCandidate]);
 
   if (hydrating && !lastScanCandidates.length) {
     return (
@@ -275,6 +309,16 @@ export default function ScanReviewScreen() {
             lastSyncedAt={lastSyncedAt}
             compact
           />
+          <TextInput
+            value={searchInput}
+            onChangeText={setSearchInput}
+            placeholder="Search filename, subject, sender, category…"
+            placeholderTextColor={colors.inkMuted}
+            style={styles.search}
+            testID="review-search"
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>Show skipped</Text>
             <Switch
@@ -284,12 +328,35 @@ export default function ScanReviewScreen() {
               testID="show-skipped-toggle"
             />
           </View>
-          <Button
-            title="Approve all visible"
-            variant="secondary"
-            onPress={() => void handleApproveAll()}
-            disabled={Boolean(approveAll) || localStats.toReview === 0}
-          />
+          <View style={styles.batchRow}>
+            <Button
+              title={
+                searchQuery.trim()
+                  ? `Approve all ${matchingPending.length} matching`
+                  : `Approve all ${matchingPending.length}`
+              }
+              variant="secondary"
+              onPress={() => void handleApproveAll()}
+              disabled={Boolean(approveAll) || matchingPending.length === 0}
+            />
+            <Button
+              title={
+                searchQuery.trim()
+                  ? `Skip all ${matchingPending.length} matching`
+                  : `Skip all ${matchingPending.length}`
+              }
+              variant="ghost"
+              onPress={() => void handleSkipAllMatching()}
+              disabled={Boolean(approveAll) || matchingPending.length === 0}
+            />
+          </View>
+          {skipBatch?.length ? (
+            <Button
+              title={`Undo skip (${skipBatch.length})`}
+              variant="ghost"
+              onPress={() => void handleUndoSkipBatch()}
+            />
+          ) : null}
           {approveAll ? (
             <View style={styles.approveAllBar} testID="approve-all-progress">
               <Text style={styles.meta}>
@@ -755,6 +822,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 2,
   },
+  search: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    ...typography.body,
+    color: colors.ink,
+    backgroundColor: colors.paperElevated,
+  },
+  batchRow: { gap: 8 },
   approveAllBar: { gap: 6, marginTop: 4 },
   barTrack: {
     height: 8,

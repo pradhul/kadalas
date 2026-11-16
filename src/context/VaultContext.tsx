@@ -31,6 +31,7 @@ import {
 } from '../services/vaultOps';
 import { clearScanJobState, getScanEngine } from '../services/scanEngine';
 import { loadReviewState, saveReviewState } from '../services/reviewPersist';
+import { loadIndexMirror, saveIndexMirror } from '../services/indexMirror';
 import {
   ApproveSuccess,
   reclaimFalseApprovals,
@@ -52,6 +53,9 @@ interface VaultContextValue {
   index: VaultIndex | null;
   loading: boolean;
   error: string | null;
+  /** Index save/load failure shown as a red banner — never silent. */
+  indexSaveError: string | null;
+  clearIndexSaveError: () => void;
   refresh: () => Promise<void>;
   documents: VaultDocument[];
   getDocument: (id: string) => VaultDocument | undefined;
@@ -145,6 +149,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [index, setIndex] = useState<VaultIndex | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [indexSaveError, setIndexSaveError] = useState<string | null>(null);
   const [scanJob, setScanJob] = useState<ScanJobState | null>(null);
   const [lastScanCandidates, setLastScanCandidates] = useState<ScanCandidate[]>([]);
   const [scanEngineRunning, setScanEngineRunning] = useState(false);
@@ -250,6 +255,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     };
   }
 
+  const clearIndexSaveError = useCallback(() => setIndexSaveError(null), []);
+
   const refresh = useCallback(async () => {
     if (!session) {
       setIndex(null);
@@ -258,6 +265,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setError(null);
     try {
+      // Paint instantly from local mirror, then reconcile with Drive
+      const mirrored = await loadIndexMirror();
+      if (mirrored?.documents?.length) {
+        setIndex((prev) => (prev?.documents?.length ? prev : mirrored));
+      }
+
       const drive = getDriveService();
       await drive.ensureVaultStructure();
       let next = await drive.loadIndex();
@@ -267,6 +280,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         next = migrated.index;
       }
       setIndex(next);
+      await saveIndexMirror(next);
+      setIndexSaveError(null);
       if (next.updatedAt) setLastSyncedAt((prev) => prev ?? next.updatedAt);
 
       const review = await loadReviewState();
@@ -302,7 +317,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const reason = e instanceof Error ? e.message : String(e);
+      setError(reason);
+      setIndexSaveError(`Couldn't save your vault list: ${reason}`);
+      // Keep mirror so Home is not empty on flaky Drive reads
+      const mirrored = await loadIndexMirror();
+      if (mirrored) setIndex(mirrored);
     } finally {
       setLoading(false);
     }
@@ -395,10 +415,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, [scanJob, index]);
 
   const updateDocument = useCallback(async (doc: VaultDocument) => {
-    const drive = getDriveService();
-    const next = await drive.upsertDocument(doc);
-    setIndex(next);
-    setLastSyncedAt(next.updatedAt);
+    try {
+      const drive = getDriveService();
+      const next = await drive.upsertDocument(doc);
+      setIndex(next);
+      await saveIndexMirror(next);
+      setLastSyncedAt(next.updatedAt);
+      setIndexSaveError(null);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      setIndexSaveError(`Couldn't save your vault list: ${reason}`);
+      throw e;
+    }
   }, []);
 
   const startMailboxScan = useCallback(
@@ -458,13 +486,21 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const setStorageMode = useCallback(
     async (mode: StorageMode) => {
-      const drive = getDriveService();
-      const current = index ?? (await drive.loadIndex());
-      const next = withVaultSettings(current, { storageMode: mode });
-      // Never delete Drive files when switching modes — only change future Approve behavior.
-      await drive.saveIndex(next);
-      setIndex(next);
-      setLastSyncedAt(next.updatedAt);
+      try {
+        const drive = getDriveService();
+        const current = index ?? (await drive.loadIndex());
+        const next = withVaultSettings(current, { storageMode: mode });
+        // Never delete Drive files when switching modes — only change future Approve behavior.
+        await drive.saveIndex(next);
+        setIndex(next);
+        await saveIndexMirror(next);
+        setLastSyncedAt(next.updatedAt);
+        setIndexSaveError(null);
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        setIndexSaveError(`Couldn't save your vault list: ${reason}`);
+        throw e;
+      }
     },
     [index],
   );
@@ -475,6 +511,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       subjectOverrides?: Record<string, string>,
     ): Promise<{ saved: ApproveResult[]; failed: Array<{ candidateId: string; reason: string }> }> => {
       const mode = settingsFromIndex(index).storageMode;
+      let latestIndex: VaultIndex | null = index;
       const flow = await runApproveFlow({
         ids,
         candidates: lastScanCandidates,
@@ -492,6 +529,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
                 }
               : undefined,
           );
+          // upsertDocument already persisted; pull fresh merged index for Home
+          const drive = getDriveService();
+          latestIndex = await drive.loadIndex();
+          setIndex(latestIndex);
+          await saveIndexMirror(latestIndex);
           return {
             category: result.category,
             title: result.document.title,
@@ -502,13 +544,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         },
       });
 
-      // Synchronous UI update before Drive round-trip flush
+      // Synchronous UI update; await flush so navigation/reload cannot drop review state
       setLastScanCandidates(flow.candidates);
       candidatesRef.current = flow.candidates;
-      void persistReview({
-        candidates: flow.candidates,
-        skippedIds: reviewRef.current.skippedIds,
-      });
+      await persistReview(
+        {
+          candidates: flow.candidates,
+          skippedIds: reviewRef.current.skippedIds,
+        },
+        { flush: true },
+      );
 
       for (const fail of flow.failed) {
         getScanEngine().logEvent(`Approve failed for ${fail.candidateId}: ${fail.reason}`);
@@ -522,20 +567,35 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (flow.saved.length) {
-        // CRITICAL: upsertDocument already wrote the new docs into vault-index.json.
-        // Never overwrite with a stale React `index` snapshot — that wiped Gmail-index
-        // approvals and made Home look empty after Approve.
-        const drive = getDriveService();
-        const fresh = await drive.loadIndex();
-        const next = {
-          ...fresh,
-          lastScanAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          settings: fresh.settings ?? index?.settings,
-        };
-        await drive.saveIndex(next);
-        setIndex(next);
-        setLastSyncedAt(next.updatedAt);
+        try {
+          const drive = getDriveService();
+          const fresh = latestIndex ?? (await drive.loadIndex());
+          const next = {
+            ...fresh,
+            lastScanAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            settings: fresh.settings ?? index?.settings,
+          };
+          await drive.saveIndex(next);
+          setIndex(next);
+          await saveIndexMirror(next);
+          setLastSyncedAt(next.updatedAt);
+          setIndexSaveError(null);
+        } catch (e) {
+          const reason = e instanceof Error ? e.message : String(e);
+          setIndexSaveError(`Couldn't save your vault list: ${reason}`);
+          // Downgrade "saved" that didn't stick on the final index write
+          return {
+            saved: [],
+            failed: [
+              ...flow.failed,
+              ...flow.saved.map((s) => ({
+                candidateId: s.candidateId,
+                reason: `Index save failed: ${reason}`,
+              })),
+            ],
+          };
+        }
       }
 
       return { saved: flow.saved, failed: flow.failed };
@@ -703,6 +763,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       index,
       loading,
       error,
+      indexSaveError,
+      clearIndexSaveError,
       refresh,
       documents: index?.documents ?? [],
       getDocument: (id) => index?.documents.find((d) => d.id === id),
@@ -738,6 +800,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       index,
       loading,
       error,
+      indexSaveError,
+      clearIndexSaveError,
       refresh,
       updateDocument,
       scanProgress,

@@ -12,7 +12,7 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DriveSafetyNote } from '../../components/DriveSafetyNote';
 import { ScanCtaCard } from '../../components/ScanCtaCard';
-import { BrandMark, Button, Chip, EmptyState, Screen } from '../../components/ui';
+import { Banner, BrandMark, Button, Chip, EmptyState, Screen } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
@@ -35,6 +35,7 @@ export default function VaultHomeScreen() {
     documents,
     loading,
     error,
+    indexSaveError,
     refresh,
     lastSyncedAt,
     vaultFolderUrl,
@@ -157,7 +158,16 @@ export default function VaultHomeScreen() {
               />
             ))}
           </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {indexSaveError ? (
+            <Banner tone="danger">
+              {indexSaveError}
+              {'\n'}
+              <Text style={styles.retry} onPress={() => void refresh()}>
+                Retry
+              </Text>
+            </Banner>
+          ) : null}
+          {error && !indexSaveError ? <Text style={styles.error}>{error}</Text> : null}
         </View>
 
         {loading && !documents.length ? (
@@ -269,6 +279,7 @@ const styles = StyleSheet.create({
   welcome: { ...typography.h2, color: colors.ink },
   meta: { ...typography.caption, color: colors.inkMuted },
   error: { ...typography.caption, color: colors.rose },
+  retry: { ...typography.caption, color: colors.rose, fontWeight: '700', textDecorationLine: 'underline' },
   dashRow: { flexDirection: 'row', gap: 8 },
   dashCard: {
     flex: 1,
