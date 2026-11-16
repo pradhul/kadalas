@@ -9,6 +9,7 @@ import {
   syncDocumentFromGmail,
 } from '../services/vaultOps';
 import { clearScanJobState, getScanEngine } from '../services/scanEngine';
+import { rekeyDemoVehicleSubjects } from '../lib/rekeyDemoSubjects';
 import { useAuth } from './AuthContext';
 import { useMocks } from '../services/config';
 
@@ -39,7 +40,7 @@ interface VaultContextValue {
   scanEngineRunning: boolean;
   /** @deprecated use startMailboxScan */
   runScan: (lookbackDays?: number) => Promise<ScanCandidate[]>;
-  approveCandidates: (ids: string[]) => Promise<void>;
+  approveCandidates: (ids: string[], subjectOverrides?: Record<string, string>) => Promise<void>;
   rejectCandidate: (id: string) => void;
   resolveAmbiguousSubject: (candidateId: string, subjectKey: string) => void;
   syncDocument: (docId: string) => Promise<SyncSuggestion | null>;
@@ -54,6 +55,38 @@ interface VaultContextValue {
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
+
+function applySubjectOverride(c: ScanCandidate, subjectKey: string): ScanCandidate {
+  if (!c.classification) return c;
+  const label = subjectKey
+    .replace(/^vehicle:reg:/, '')
+    .replace(/^vehicle:chassis:/, '')
+    .replace(/^weak:/, '')
+    .replace(/^account:/, '');
+  return {
+    ...c,
+    status: 'pending',
+    subjectAmbiguous: false,
+    groupId: subjectKey.startsWith('vehicle:')
+      ? `vehicle_insurance::${subjectKey}`
+      : c.groupId,
+    groupLabel: label,
+    classification: {
+      ...c.classification,
+      metadata: {
+        ...c.classification.metadata,
+        subjectKey,
+        subjectLabel: label,
+        subjectConfidence: '1',
+        registrationNumber:
+          c.classification.metadata.registrationNumber ||
+          (subjectKey.startsWith('vehicle:reg:')
+            ? subjectKey.replace('vehicle:reg:', '')
+            : c.classification.metadata.registrationNumber),
+      },
+    },
+  };
+}
 
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const { session } = useAuth();
@@ -74,7 +107,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     try {
       const drive = getDriveService();
       await drive.ensureVaultStructure();
-      const next = await drive.loadIndex();
+      let next = await drive.loadIndex();
+      // Real vaults: strip leaked demo plate subjects from index metadata only
+      // (never delete Drive files). Mock/demo vaults keep sample vehicles.
+      const migrated = rekeyDemoVehicleSubjects(next, useMocks());
+      if (migrated.changed) {
+        await drive.saveIndex(migrated.index);
+        next = migrated.index;
+      }
       setIndex(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -182,7 +222,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   );
 
   const approveCandidates = useCallback(
-    async (ids: string[]) => {
+    async (ids: string[], subjectOverrides?: Record<string, string>) => {
       const selected = lastScanCandidates.filter(
         (c) =>
           ids.includes(c.id) &&
@@ -194,7 +234,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         ? selected
         : lastScanCandidates.filter((c) => ids.includes(c.id) && c.status === 'pending');
 
-      for (const candidate of toSave) {
+      for (const raw of toSave) {
+        const overrideKey = subjectOverrides?.[raw.id];
+        const candidate = overrideKey
+          ? applySubjectOverride(raw, overrideKey)
+          : raw;
         // Older versions in the same group become Drive version history via apply path
         const older = lastScanCandidates.filter(
           (c) => c.groupId && c.groupId === candidate.groupId && c.id !== candidate.id && c.status === 'duplicate',

@@ -252,6 +252,7 @@ export function applyClassificationResult(
   contentHash: string | undefined,
   vaultDocuments: VaultDocument[],
   nowIso: string = new Date().toISOString(),
+  enrichOptions: { allowDemoPlates?: boolean } = {},
 ): ScanJobState {
   const item = state.items[itemId];
   if (!item) return state;
@@ -281,7 +282,11 @@ export function applyClassificationResult(
     contentRef: contentHash,
     status: finalClassification.isImportantDocument ? 'pending' : 'skipped',
   };
-  candidate = enrichCandidateWithSubject(candidate);
+  const subjectOpts = {
+    vaultDocuments,
+    allowDemoPlates: Boolean(enrichOptions.allowDemoPlates),
+  };
+  candidate = enrichCandidateWithSubject(candidate, subjectOpts);
 
   const dup = findDuplicateInVault(
     {
@@ -329,7 +334,7 @@ export function applyClassificationResult(
   };
 
   // Re-group all candidates so review list shows entity groups incrementally
-  const grouped = groupCandidatesBySubject(next.candidates);
+  const grouped = groupCandidatesBySubject(next.candidates, subjectOpts);
   next.candidates = grouped.flat;
 
   if (next.classifyQueue.length) next.stage = 'classify';
@@ -340,8 +345,15 @@ export function applyClassificationResult(
   return bumpProgressHighWater(next);
 }
 
-export function finalizeDedupeGrouping(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
-  const grouped = groupCandidatesBySubject(state.candidates);
+export function finalizeDedupeGrouping(
+  state: ScanJobState,
+  nowIso = new Date().toISOString(),
+  options: { vaultDocuments?: VaultDocument[]; allowDemoPlates?: boolean } = {},
+): ScanJobState {
+  const grouped = groupCandidatesBySubject(state.candidates, {
+    vaultDocuments: options.vaultDocuments,
+    allowDemoPlates: Boolean(options.allowDemoPlates),
+  });
   return bumpProgressHighWater({
     ...state,
     stage: 'completed',

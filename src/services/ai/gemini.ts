@@ -114,11 +114,14 @@ Return ONLY JSON with keys:
 category (one of: Insurance/Vehicle, Insurance/Health, Insurance/Home, Insurance/Life, Banking, Tax, Identity, Bills, Warranties, Travel, Other),
 title (clean short title),
 issuer, documentType, referenceNumber, holderName, issueDate (YYYY-MM-DD), expiryDate (YYYY-MM-DD),
-registrationNumber (vehicle plate if any), chassisNumber, engineNumber, vehicleMakeModel,
+registrationNumber, chassisNumber, engineNumber, vehicleMakeModel,
 propertyAddress, deviceSerial,
 isImportantDocument (boolean), confidence (0-1), reason (short).
-For vehicles, always extract registration/plate when visible — policy numbers change on renewal.
-Skip promos/newsletters (isImportantDocument=false).`;
+Rules:
+- Set registrationNumber / chassisNumber ONLY when that exact identifier is clearly visible in the document or email text. Never invent, guess, or use placeholder plates.
+- For non-vehicle categories (Banking, Health, Tax, etc.) leave registrationNumber empty.
+- For vehicle documents, extract the plate when visible — policy numbers change on renewal.
+- Skip promos/newsletters (isImportantDocument=false).`;
 
       const parts: Array<Record<string, unknown>> = [{ text: prompt }];
       if (input.subject || input.from) {

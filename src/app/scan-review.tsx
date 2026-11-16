@@ -7,21 +7,36 @@ import { colors, radii, spacing, typography } from '../constants/theme';
 import { useVault } from '../context/VaultContext';
 import { formatCoverageType } from '../lib/coverageSlots';
 import { buildGroupedReview, groupCandidatesBySubject } from '../lib/grouping';
+import {
+  formatSubjectSuggestionLabel,
+  isVehicleReviewFamily,
+} from '../lib/subjectSuggestions';
 import { MOCK_SCAN_CANDIDATES } from '../mocks/data';
+import { useMocks } from '../services/config';
 import type { ScanCandidate } from '../types/document';
 
 export default function ScanReviewScreen() {
   const {
     lastScanCandidates,
+    documents,
     approveCandidates,
     rejectCandidate,
-    resolveAmbiguousSubject,
     seedScanCandidates,
   } = useVault();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Optional subject-chip toggle per candidate — never replaces Approve/Skip. */
+  const [selectedKeys, setSelectedKeys] = useState<Record<string, string | null>>({});
 
-  const groups = useMemo(() => buildGroupedReview(lastScanCandidates), [lastScanCandidates]);
+  const enrichOpts = useMemo(
+    () => ({ vaultDocuments: documents, allowDemoPlates: useMocks() }),
+    [documents],
+  );
+
+  const groups = useMemo(
+    () => buildGroupedReview(lastScanCandidates, enrichOpts),
+    [lastScanCandidates, enrichOpts],
+  );
   const pending = lastScanCandidates.filter(
     (c) => c.status === 'pending' || c.status === 'needs_subject_confirm',
   );
@@ -36,6 +51,26 @@ export default function ScanReviewScreen() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  function toggleChip(candidateId: string, key: string) {
+    setSelectedKeys((prev) => ({
+      ...prev,
+      [candidateId]: prev[candidateId] === key ? null : key,
+    }));
+  }
+
+  async function handleApprove(c: ScanCandidate) {
+    const selected = selectedKeys[c.id];
+    await approveCandidates(
+      [c.id],
+      selected ? { [c.id]: selected } : undefined,
+    );
+    setSelectedKeys((prev) => {
+      const next = { ...prev };
+      delete next[c.id];
+      return next;
+    });
   }
 
   return (
@@ -64,6 +99,7 @@ export default function ScanReviewScreen() {
                   onPress={() => {
                     const { flat } = groupCandidatesBySubject(
                       MOCK_SCAN_CANDIDATES.filter((c) => c.status !== 'skipped'),
+                      { allowDemoPlates: true, vaultDocuments: documents },
                     );
                     seedScanCandidates(flat);
                   }}
@@ -75,23 +111,16 @@ export default function ScanReviewScreen() {
             <View key={g.id} style={styles.group} testID={`review-group-${g.id}`}>
               <Text style={styles.groupTitle}>{g.title}</Text>
               {g.subtitle ? <Text style={styles.meta}>{g.subtitle}</Text> : null}
-              {g.kind === 'ambiguous' ? (
-                <Banner tone="warn">
-                  Subject key unclear. Confirm registration / chassis before saving into a vehicle group.
-                </Banner>
-              ) : null}
               {g.candidates.map((c) => (
                 <CandidateCard
                   key={c.id}
                   candidate={c}
+                  vaultDocuments={documents}
                   busy={busyId === c.id}
-                  onApprove={() => act(c.id, () => approveCandidates([c.id]))}
+                  selectedKey={selectedKeys[c.id] ?? null}
+                  onToggleChip={(key) => toggleChip(c.id, key)}
+                  onApprove={() => act(c.id, () => handleApprove(c))}
                   onReject={() => act(c.id, async () => rejectCandidate(c.id))}
-                  onConfirmSubject={(key) =>
-                    act(c.id, async () => {
-                      resolveAmbiguousSubject?.(c.id, key);
-                    })
-                  }
                 />
               ))}
             </View>
@@ -104,46 +133,80 @@ export default function ScanReviewScreen() {
 
 function CandidateCard({
   candidate: c,
+  vaultDocuments,
   busy,
+  selectedKey,
+  onToggleChip,
   onApprove,
   onReject,
-  onConfirmSubject,
 }: {
   candidate: ScanCandidate;
+  vaultDocuments: import('../types/document').VaultDocument[];
   busy: boolean;
+  selectedKey: string | null;
+  onToggleChip: (key: string) => void;
   onApprove: () => void;
   onReject: () => void;
-  onConfirmSubject: (key: string) => void;
 }) {
   const m = c.classification?.metadata ?? {};
   const done = c.status === 'approved' || c.status === 'rejected' || c.status === 'duplicate';
-  const possibleKeys = c.possibleSubjectKeys;
+  const showCover = isVehicleReviewFamily(c.classification?.category, m.documentType);
+  const possibleKeys =
+    showCover && c.possibleSubjectKeys?.length ? c.possibleSubjectKeys : undefined;
+
+  const subjectDisplay =
+    m.subjectLabel && !String(m.subjectLabel).includes(':')
+      ? m.subjectLabel
+      : m.subjectKey
+        ? formatSubjectSuggestionLabel(m.subjectKey, vaultDocuments)
+        : null;
+
   return (
-    <View style={[styles.card, done && styles.cardDone]}>
+    <View style={[styles.card, done && styles.cardDone]} testID={`review-card-${c.id}`}>
       <Text style={styles.cardTitle}>{c.fileName}</Text>
       <Text style={styles.meta}>
-        {c.classification?.category ?? 'Unclassified'} · {m.issuer ?? 'Unknown insurer'} ·{' '}
-        {formatCoverageType(m.coverageType)}
+        {c.classification?.category ?? 'Unclassified'} · {m.issuer ?? 'Unknown issuer'}
+        {showCover ? ` · ${formatCoverageType(m.coverageType)}` : ''}
       </Text>
-      {m.subjectKey ? (
+      {subjectDisplay ? (
         <Text style={styles.meta}>
-          Subject: {m.subjectLabel || m.subjectKey}
-          {m.coverageSlots ? ` · slots ${m.coverageSlots}` : ''}
+          Subject: {subjectDisplay}
+          {showCover && m.coverageSlots ? ` · slots ${m.coverageSlots}` : ''}
         </Text>
       ) : null}
       {m.referenceNumber ? <Text style={styles.meta}>Policy #: {m.referenceNumber}</Text> : null}
       {m.expiryDate ? <Text style={styles.meta}>Covers until {m.expiryDate}</Text> : null}
       {c.isGroupLatest === false ? (
-        <Text style={styles.hint}>Older version — will move to _versions when the current policy is approved</Text>
+        <Text style={styles.hint}>
+          Older version — will move to _versions when the current policy is approved
+        </Text>
       ) : null}
-      {c.status === 'needs_subject_confirm' && possibleKeys?.length ? (
-        <View style={styles.subjectRow}>
-          {possibleKeys.map((k) => (
-            <Button key={k} title={k} variant="secondary" disabled={busy} onPress={() => onConfirmSubject(k)} />
-          ))}
+
+      {!done && possibleKeys?.length && c.isGroupLatest !== false ? (
+        <View style={styles.chipBlock}>
+          <Text style={styles.helper}>Group this with:</Text>
+          <View style={styles.subjectRow}>
+            {possibleKeys.map((k) => {
+              const active = selectedKey === k;
+              return (
+                <Pressable
+                  key={k}
+                  disabled={busy}
+                  onPress={() => onToggleChip(k)}
+                  style={[styles.chip, active && styles.chipActive]}
+                  testID={`subject-chip-${k}`}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {formatSubjectSuggestionLabel(k, vaultDocuments)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
       ) : null}
-      {!done && c.status !== 'needs_subject_confirm' && c.isGroupLatest !== false ? (
+
+      {!done && c.isGroupLatest !== false ? (
         <View style={styles.actions}>
           <Button title="Approve" loading={busy} onPress={onApprove} />
           <Button title="Skip" variant="ghost" disabled={busy} onPress={onReject} />
@@ -180,6 +243,22 @@ const styles = StyleSheet.create({
   cardDone: { opacity: 0.55 },
   cardTitle: { ...typography.bodyStrong, color: colors.ink },
   actions: { flexDirection: 'row', gap: 8, marginTop: 6 },
-  subjectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
+  chipBlock: { marginTop: 6, gap: 4 },
+  helper: { ...typography.caption, color: colors.inkMuted },
+  subjectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: colors.paper,
+  },
+  chipActive: {
+    borderColor: colors.teal,
+    backgroundColor: colors.tealSoft,
+  },
+  chipText: { ...typography.caption, color: colors.ink },
+  chipTextActive: { color: colors.teal, fontWeight: '600' },
   status: { ...typography.caption, color: colors.inkMuted, textTransform: 'uppercase' },
 });

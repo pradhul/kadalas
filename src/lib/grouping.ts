@@ -1,4 +1,4 @@
-import { ClassificationResult, ScanCandidate } from '../types/document';
+import { ClassificationResult, ScanCandidate, VaultDocument } from '../types/document';
 import {
   applyCoverageMetadata,
   detectCoverageTypeFromText,
@@ -15,8 +15,16 @@ import {
   resolveSubjectKey,
   applySubjectToMetadata,
 } from './subjectKey';
+import {
+  buildVehicleSubjectSuggestions,
+  candidateGroundingText,
+  dedupeScanCandidates,
+  isVehicleReviewFamily,
+  sanitizeMetadataAgainstText,
+} from './subjectSuggestions';
 
 export { parseFlexibleDate } from './dates';
+export { dedupeScanCandidates } from './subjectSuggestions';
 
 export interface VersionedCandidate extends ScanCandidate {
   rankTimeMs: number;
@@ -38,6 +46,12 @@ export interface DocumentGroup {
   summary: string;
 }
 
+export type EnrichSubjectOptions = {
+  vaultDocuments?: VaultDocument[];
+  /** When true (mock/demo vault), demo plates may be retained. */
+  allowDemoPlates?: boolean;
+};
+
 export function versionRankTime(input: {
   metadata?: ClassificationResult['metadata'];
   emailDate?: string;
@@ -54,22 +68,27 @@ export function versionRankTime(input: {
 }
 
 /** Attach subject keys + coverage type from classification / text. */
-export function enrichCandidateWithSubject(candidate: ScanCandidate): ScanCandidate {
+export function enrichCandidateWithSubject(
+  candidate: ScanCandidate,
+  options: EnrichSubjectOptions = {},
+): ScanCandidate {
   if (!candidate.classification) return candidate;
 
-  const hay = [
-    candidate.classification.metadata.documentType,
-    candidate.classification.metadata.coverageType,
-    candidate.classification.title,
-    candidate.subject,
-    candidate.fileName,
-    candidate.previewSnippet,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const allowDemoPlates = Boolean(options.allowDemoPlates);
+  const vaultDocuments = options.vaultDocuments ?? [];
 
-  let metadata = { ...candidate.classification.metadata };
+  const hay = candidateGroundingText(candidate);
+
+  let metadata = sanitizeMetadataAgainstText(
+    { ...candidate.classification.metadata },
+    hay,
+    { allowDemoPlates },
+  );
   const family = documentTypeFamily(candidate.classification.category, metadata.documentType);
+  const vehicleFamily = isVehicleReviewFamily(
+    candidate.classification.category,
+    metadata.documentType,
+  );
 
   if (family === 'vehicle_insurance') {
     const detected =
@@ -85,8 +104,13 @@ export function enrichCandidateWithSubject(candidate: ScanCandidate): ScanCandid
             ? 'Third Party liability'
             : 'Package / comprehensive policy';
     }
+  } else {
+    // Coverage slots / "Unknown cover" only apply to vehicle insurance
+    delete metadata.coverageType;
+    delete metadata.coverageSlots;
   }
 
+  // registrationNumber / chassis already sanitized against text + demo plates
   const resolution = resolveSubjectKey({
     category: candidate.classification.category,
     metadata,
@@ -94,43 +118,46 @@ export function enrichCandidateWithSubject(candidate: ScanCandidate): ScanCandid
   });
   metadata = applySubjectToMetadata(metadata, resolution);
 
-  const groupId = resolution.subjectKey
-    ? buildGroupId(family, resolution.subjectKey)
-    : undefined;
-  const ambiguous = resolution.ambiguous || !resolution.subjectKey || resolution.confidence < 0.7;
+  const subjectKey = metadata.subjectKey ?? null;
+  const subjectLabel = metadata.subjectLabel ?? null;
+  const ambiguous =
+    resolution.ambiguous || !subjectKey || resolution.confidence < 0.7;
 
-  const possibleSubjectKeys = ambiguous
-    ? buildPossibleSubjectKeys(metadata, resolution.subjectKey)
-    : candidate.possibleSubjectKeys;
+  const groupId = subjectKey ? buildGroupId(family, subjectKey) : undefined;
+
+  // Vehicle chips: vault vehicles + grounded plate from this doc only. Never demo defaults.
+  let possibleSubjectKeys: string[] | undefined = candidate.possibleSubjectKeys;
+  if (vehicleFamily) {
+    const suggestions = buildVehicleSubjectSuggestions({
+      metadata,
+      groundingText: hay,
+      vaultDocuments,
+      allowDemoPlates,
+    });
+    possibleSubjectKeys = suggestions.map((s) => s.key);
+  } else {
+    // Non-vehicle: never offer vehicle:reg chips (including demo leaks)
+    possibleSubjectKeys = undefined;
+  }
+
+  // needs_subject_confirm only when vehicle family AND we have real choices to toggle.
+  // Otherwise keep pending so Approve/Skip always remain available.
+  let status = candidate.status;
+  if (vehicleFamily && ambiguous && (possibleSubjectKeys?.length ?? 0) > 0 && status === 'pending') {
+    status = 'needs_subject_confirm';
+  } else if (status === 'needs_subject_confirm' && (!vehicleFamily || !(possibleSubjectKeys?.length))) {
+    status = 'pending';
+  }
 
   return {
     ...candidate,
     classification: { ...candidate.classification, metadata },
     groupId,
-    groupLabel: buildGroupLabel(resolution.subjectLabel, family, metadata.documentType),
+    groupLabel: buildGroupLabel(subjectLabel, family, metadata.documentType),
     subjectAmbiguous: ambiguous,
     possibleSubjectKeys,
-    status: ambiguous && candidate.status === 'pending' ? 'needs_subject_confirm' : candidate.status,
+    status,
   };
-}
-
-function buildPossibleSubjectKeys(
-  metadata: import('../types/document').DocumentMetadata,
-  weakKey?: string | null,
-): string[] {
-  const keys: string[] = [];
-  if (metadata.registrationNumber) {
-    keys.push(`vehicle:reg:${metadata.registrationNumber.toUpperCase().replace(/[^A-Z0-9]/g, '')}`);
-  }
-  if (metadata.chassisNumber) {
-    keys.push(`vehicle:chassis:${metadata.chassisNumber.toUpperCase().replace(/[^A-Z0-9]/g, '')}`);
-  }
-  if (weakKey && !keys.includes(weakKey)) keys.push(weakKey);
-  // Demo-friendly defaults when AI found nothing durable
-  if (!keys.length) {
-    keys.push('vehicle:reg:KA01AB1234', 'vehicle:reg:MH12XY9876');
-  }
-  return keys;
 }
 
 export function buildGroupLabel(
@@ -150,12 +177,16 @@ export function buildGroupLabel(
  * Group candidates by (document type family + subject key).
  * Vehicle insurance uses coverage slots so OD + TP can both be current.
  */
-export function groupCandidatesBySubject(candidates: ScanCandidate[]): {
+export function groupCandidatesBySubject(
+  candidates: ScanCandidate[],
+  options: EnrichSubjectOptions = {},
+): {
   groups: DocumentGroup[];
   flat: ScanCandidate[];
   ungrouped: ScanCandidate[];
 } {
-  const enriched = candidates.map(enrichCandidateWithSubject);
+  const deduped = dedupeScanCandidates(candidates);
+  const enriched = deduped.map((c) => enrichCandidateWithSubject(c, options));
   const byGroup = new Map<string, VersionedCandidate[]>();
   const ungrouped: ScanCandidate[] = [];
 
@@ -252,7 +283,9 @@ export function groupCandidatesBySubject(candidates: ScanCandidate[]): {
       duplicateOfId: currentOut[0]?.id,
     }));
 
-    const latest = currentOut[0] ? { ...members.find((m) => m.id === currentOut[0].id)!, ...currentOut[0] } : sorted[0];
+    const latest = currentOut[0]
+      ? { ...members.find((m) => m.id === currentOut[0].id)!, ...currentOut[0] }
+      : sorted[0];
 
     groups.push({
       groupId,
@@ -297,12 +330,15 @@ function latestPeriodLabel(c: VersionedCandidate): string {
   return 'latest';
 }
 
-export function selectLatestInGroup(members: ScanCandidate[]): {
+export function selectLatestInGroup(
+  members: ScanCandidate[],
+  options: EnrichSubjectOptions = {},
+): {
   latest: ScanCandidate;
   older: ScanCandidate[];
   currentDocs: ScanCandidate[];
 } {
-  const { groups } = groupCandidatesBySubject(members);
+  const { groups } = groupCandidatesBySubject(members, options);
   if (groups.length === 1) {
     return {
       latest: groups[0].latest,
@@ -320,14 +356,17 @@ export function selectLatestInGroup(members: ScanCandidate[]): {
 }
 
 /** UI-friendly grouped review rows for the scan-review screen. */
-export function buildGroupedReview(candidates: ScanCandidate[]): Array<{
+export function buildGroupedReview(
+  candidates: ScanCandidate[],
+  options: EnrichSubjectOptions = {},
+): Array<{
   id: string;
   title: string;
   subtitle?: string;
   kind: 'subject' | 'ambiguous' | 'ungrouped';
   candidates: ScanCandidate[];
 }> {
-  const { groups, ungrouped } = groupCandidatesBySubject(candidates);
+  const { groups, ungrouped } = groupCandidatesBySubject(candidates, options);
   const rows: Array<{
     id: string;
     title: string;
@@ -355,7 +394,7 @@ export function buildGroupedReview(candidates: ScanCandidate[]): Array<{
     rows.push({
       id: 'ambiguous',
       title: 'Needs subject confirmation',
-      subtitle: 'Registration / chassis unclear — confirm before grouping',
+      subtitle: 'Optional: link to a vehicle from your vault, or Approve as-is',
       kind: 'ambiguous',
       candidates: ambiguous,
     });

@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-11-16
+
+### Fixed
+
+- Scan review no longer injects demo plates `KA01AB1234` / `MH12XY9876` when subject keys are empty (real Google vaults)
+- AI-extracted registration / chassis must appear in document text; ungrounded and demo plates are dropped
+- Vehicle subject chips only for vehicle categories, and only vault vehicles + grounded plates from the doc
+- Every review item always shows **Approve** and **Skip**; subject chips are optional toggles (“Group this with:”) with friendly labels (never raw `vehicle:reg:…` / `weak:…`)
+- Review list dedupes by Gmail `messageId`+`attachmentId` or content hash
+- “Unknown cover” only shown for vehicle insurance coverage slots
+- On vault load (non-mock), index metadata with fake demo plate subjects is re-keyed to a non-vehicle subject — Drive files are never deleted
+
+### Changed
+
+- Version bump to **0.1.5**
+
 ## [0.1.4] - 2026-11-15
 
 ### Fixed
@@ -101,6 +117,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.5]: https://github.com/pradhul/kadalas/releases/tag/v0.1.5
 [0.1.4]: https://github.com/pradhul/kadalas/releases/tag/v0.1.4
 [0.1.3]: https://github.com/pradhul/kadalas/releases/tag/v0.1.3
 [0.1.2]: https://github.com/pradhul/kadalas/releases/tag/v0.1.2

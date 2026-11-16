@@ -56,10 +56,13 @@ export function resolveSubjectKey(input: {
   const ref = normalizeIdentifier(meta.referenceNumber);
   const docType = normalizeDocType(meta.documentType, category);
 
+  // Category / document type must indicate vehicle — never treat a
+  // hallucinated registration alone as proof this is a vehicle document.
   const isVehicle =
     category.startsWith('Insurance/Vehicle') ||
-    /vehicle|motor|car|auto/i.test(meta.documentType ?? '') ||
-    Boolean(reg || chassis);
+    /vehicle|motor|car|auto|rc\b|registration certificate|puc|pollution/i.test(
+      `${meta.documentType ?? ''} ${input.title ?? ''}`,
+    );
 
   if (isVehicle) {
     if (reg) {

@@ -10,7 +10,7 @@ function yearComp(year: number, insurer: string): ScanCandidate {
     id: `y${year}`,
     gmailMessageId: `m${year}`,
     gmailAttachmentId: `a${year}`,
-    subject: `${insurer} Package ${year} DL-01-CD-4321`,
+    subject: `${insurer} Package ${year} RJ-14-CD-9999`,
     from: `${insurer} <x@y.com>`,
     date: `${year}-05-06T00:00:00.000Z`,
     fileName: `p-${year}.pdf`,
@@ -24,7 +24,7 @@ function yearComp(year: number, insurer: string): ScanCandidate {
         issuer: insurer,
         documentType: 'Package Policy',
         coverageType: 'comprehensive',
-        registrationNumber: 'DL-01-CD-4321',
+        registrationNumber: 'RJ-14-CD-9999',
         issueDate: `${year}-05-06`,
         expiryDate: `${year + 1}-05-05`,
         policyStartDate: `${year}-05-06`,
@@ -46,7 +46,7 @@ describe('entity-aware grouping', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0].summary).toBe(
-      'DL-01-CD-4321: 4 versions found, keeping 2026-27 policy',
+      'RJ-14-CD-9999: 4 versions found, keeping 2026-27 policy',
     );
     expect(groups[0].currentDocs).toHaveLength(1);
     expect(groups[0].currentDocs[0].id).toBe('y2026');
@@ -61,12 +61,12 @@ describe('entity-aware grouping', () => {
       yearComp(2026, 'Allstate'),
     ]);
     expect(groups).toHaveLength(1);
-    expect(groups[0].subjectKey).toBe('vehicle:reg:DL01CD4321');
+    expect(groups[0].subjectKey).toBe('vehicle:reg:RJ14CD9999');
     expect(groups[0].currentDocs[0].classification?.metadata.issuer).toBe('Allstate');
     expect(groups[0].older[0].classification?.metadata.issuer).toBe('State Farm');
   });
 
-  it('flags ambiguous vehicle docs without registration for subject confirm', () => {
+  it('flags ambiguous vehicle docs without registration; stays approveable (no demo chips)', () => {
     const raw: ScanCandidate = {
       id: 'amb',
       gmailMessageId: 'm',
@@ -90,15 +90,17 @@ describe('entity-aware grouping', () => {
         isImportantDocument: true,
       },
     };
-    const enriched = enrichCandidateWithSubject(raw);
+    const enriched = enrichCandidateWithSubject(raw, { allowDemoPlates: false });
     expect(enriched.subjectAmbiguous).toBe(true);
-    expect(enriched.status).toBe('needs_subject_confirm');
-    expect(enriched.possibleSubjectKeys?.length).toBeGreaterThan(0);
+    expect(enriched.status).toBe('pending');
+    expect(enriched.possibleSubjectKeys ?? []).toHaveLength(0);
+    expect(JSON.stringify(enriched)).not.toMatch(/KA01AB1234|MH12XY9876/);
   });
 
   it('demo mock batch produces DL-01 group with 4 versions summary', () => {
     const { groups } = groupCandidatesBySubject(
       MOCK_SCAN_CANDIDATES.filter((c) => c.status !== 'skipped'),
+      { allowDemoPlates: true },
     );
     const dl = groups.find((g) => g.subjectLabel === 'DL-01-CD-4321');
     expect(dl).toBeTruthy();

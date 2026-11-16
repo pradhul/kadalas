@@ -41,7 +41,11 @@ export function createOpenAiCompatibleProvider(config: CompatibleConfig): AiProv
 
       const userContent = [
         'Classify this personal document. Return ONLY JSON with keys:',
-        'category, title, issuer, documentType, referenceNumber, holderName, issueDate, expiryDate, isImportantDocument, confidence, reason.',
+        'category, title, issuer, documentType, referenceNumber, holderName, issueDate, expiryDate,',
+        'registrationNumber, chassisNumber, engineNumber, vehicleMakeModel, propertyAddress, deviceSerial,',
+        'isImportantDocument, confidence, reason.',
+        'Set registrationNumber/chassisNumber ONLY when clearly visible in the document text — never invent or use placeholder plates.',
+        'For non-vehicle categories leave registrationNumber empty.',
         `fileName=${input.fileName}`,
         `mimeType=${input.mimeType}`,
         input.subject ? `subject=${input.subject}` : '',

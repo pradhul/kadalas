@@ -181,7 +181,10 @@ export class ScanEngine {
           } else if (this.state.stage === 'classify') {
             await this.stepClassify();
           } else if (this.state.stage === 'dedupe') {
-            const next = finalizeDedupeGrouping(this.state);
+            const next = finalizeDedupeGrouping(this.state, new Date().toISOString(), {
+              vaultDocuments: this.vaultDocuments,
+              allowDemoPlates: useMocks(),
+            });
             this.emit(appendScanEvent(next, 'Scan completed'));
             await this.persist(true);
           } else {
@@ -386,6 +389,8 @@ export class ScanEngine {
       classification,
       contentHash,
       this.vaultDocuments,
+      new Date().toISOString(),
+      { allowDemoPlates: useMocks() },
     );
     this.emit({ ...next, lastStepAt: new Date().toISOString() });
   }
