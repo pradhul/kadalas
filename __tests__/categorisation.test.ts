@@ -46,6 +46,35 @@ describe('categorisation', () => {
     expect(normalizeCategory('Bank statements')).toBe('Banking');
     expect(normalizeCategory('something weird')).toBe('Other');
   });
+
+  it('normalizes Indian bank and tax keywords', () => {
+    expect(normalizeCategory('HDFC Bank statement Q1')).toBe('Banking');
+    expect(normalizeCategory('SBI account statement')).toBe('Banking');
+    expect(normalizeCategory('Form 16 FY 2024-25')).toBe('Tax');
+    expect(normalizeCategory('ITR-1 acknowledgment')).toBe('Tax');
+    expect(normalizeCategory('Aadhaar e-KYC')).toBe('Identity');
+  });
+
+  it('classifies via sender domain and filename hints', () => {
+    const bank = classifyWithRules({
+      from: 'Alerts <alerts@hdfcbank.com>',
+      fileName: 'stmt_jan.pdf',
+      subject: 'Your account',
+    });
+    expect(bank.category).toBe('Banking');
+
+    const tax = classifyWithRules({
+      fileName: 'form16_2025.pdf',
+      subject: 'Compensation',
+    });
+    expect(tax.category).toBe('Tax');
+
+    const vehicle = classifyWithRules({
+      fileName: 'motor_od_policy.pdf',
+      textExcerpt: 'Own damage cover Bajaj Allianz',
+    });
+    expect(vehicle.category).toBe('Insurance/Vehicle');
+  });
 });
 
 describe('rate limit queue', () => {

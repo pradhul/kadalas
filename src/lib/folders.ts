@@ -52,16 +52,50 @@ export function normalizeCategory(raw: string | undefined | null): VaultCategory
   const lower = cleaned.toLowerCase();
 
   const rules: Array<{ test: RegExp; category: VaultCategory }> = [
-    { test: /vehicle|car|auto|motor|garage/, category: 'Insurance/Vehicle' },
+    // Vehicle — include Indian OD/TP wording before generic "insurance"
+    {
+      test: /vehicle|motor|car\s*insur|two.?wheeler|rc\s*book|puc\b|\bod\b|\btp\b|third\s*party|own\s*damage|chassis|registration\s*certificate/i,
+      category: 'Insurance/Vehicle',
+    },
+    {
+      test: /bajaj\s*allianz|hdfc\s*ergo|icici\s*lombard|acko|digit\s*insur|go\s*digit|new\s*india|national\s*insur/i,
+      category: 'Insurance/Vehicle',
+    },
+    { test: /mediassist|health\s*insur|cashless|hospitalization|mediclaim/, category: 'Insurance/Health' },
+    { test: /prescription|lab\s*report|discharge\s*summary|diagnostic|pathology|radiology/, category: 'Insurance/Health' },
     { test: /health|medical|dental|hospital/, category: 'Insurance/Health' },
-    { test: /home.?owner|home.?insur|property.?insur|contents/, category: 'Insurance/Home' },
-    { test: /life.?insur|term.?life/, category: 'Insurance/Life' },
+    { test: /home.?owner|home.?insur|property.?insur|contents|house\s*insur/, category: 'Insurance/Home' },
+    { test: /life.?insur|term\s*plan|term\s*life|lic\s*policy/, category: 'Insurance/Life' },
     { test: /insur/, category: 'Insurance/Health' },
-    { test: /bank|statement|account|iban|routing/, category: 'Banking' },
+  // Banking & credit
+  {
+    test: /bank\s*of\s*baroda|\bbob\b|hdfc|state\s*bank|\bsbi\b|icici|axis\s*bank|kotak|yes\s*bank|indusind|canara\s*bank|punjab\s*national|\bpnb\b/,
+    category: 'Banking',
+  },
+    { test: /bank\s*statement|account\s*statement|passbook|loan\s*statement|neft|imps|upi\s*statement/, category: 'Banking' },
+    { test: /credit\s*card|mastercard|visa\s*card|rupay|amex/, category: 'Bills' },
+    { test: /bank|statement|account|iban|routing|fixed\s*deposit|\bfd\b/, category: 'Banking' },
+  // Tax & salary
+    { test: /form\s*16|form\s*16a|itr-?\d|26as|\bais\b|tds\s*certificate|income\s*tax|gst\s*return/, category: 'Tax' },
+    { test: /salary\s*slip|payslip|pay\s*slip|ctc\s*letter|compensation\s*letter/, category: 'Tax' },
     { test: /tax|irs|hmrc|w-?2|1099|vat/, category: 'Tax' },
-    { test: /passport|license|licence|id.?card|identity|ssn|aadhaar/, category: 'Identity' },
+  // Identity
+    {
+      test: /aadhaar|aadhar|\bpan\b|passport|driving\s*licen|driver'?s\s*licen|\bdl\b|voter\s*id|election\s*card|voter\s*card/,
+      category: 'Identity',
+    },
+    { test: /license|licence|id.?card|identity|ssn/, category: 'Identity' },
+  // Bills & utilities
+    {
+      test: /electricity|bescom|mseb|tangedco|water\s*bill|gas\s*bill|broadband|dth|jio|airtel|vi\s*postpaid|utility\s*bill/,
+      category: 'Bills',
+    },
     { test: /bill|utility|electric|water|gas|internet|phone/, category: 'Bills' },
-    { test: /warrant|guarantee|receipt/, category: 'Warranties' },
+  // Receipts, invoices, warranties
+    { test: /invoice|tax\s*invoice|e-?invoice|proforma/, category: 'Warranties' },
+    { test: /warrant|guarantee|receipt|purchase\s*proof/, category: 'Warranties' },
+  // Travel & tickets
+    { test: /irctc|boarding\s*pass|pnr\b|flight\s*ticket|train\s*ticket|makemytrip|cleartrip|goibibo|hotel\s*confirm/, category: 'Travel' },
     { test: /travel|flight|hotel|itinerary|visa/, category: 'Travel' },
   ];
 

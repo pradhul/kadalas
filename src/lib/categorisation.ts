@@ -25,9 +25,47 @@ const DOC_HINT_PATTERNS = [
   /renewal/i,
   /premium/i,
   /account\s*(no|number|#)/i,
+  /aadhaar|aadhar/i,
+  /\bpan\b/i,
+  /form\s*16/i,
+  /itr/i,
+  /salary\s*slip|payslip/i,
+  /credit\s*card/i,
+  /irctc|pnr/i,
+  /mediassist/i,
 ];
 
 const ATTACHMENT_ALLOW = [/\.pdf$/i, /\.png$/i, /\.jpe?g$/i, /\.webp$/i, /\.tif{1,2}$/i];
+
+/** Sender domains → category hint (lowercase host). */
+const SENDER_DOMAIN_HINTS: Array<{ test: RegExp; category: VaultCategory }> = [
+  { test: /@hdfcbank\.|@hdfcbank\.com/i, category: 'Banking' },
+  { test: /@sbi\.co\.|@onlinesbi\./i, category: 'Banking' },
+  { test: /@icicibank\.|@icici\.com/i, category: 'Banking' },
+  { test: /@axisbank\./i, category: 'Banking' },
+  { test: /@bankofbaroda\.|@bobibanking\./i, category: 'Banking' },
+  { test: /@kotak\.com/i, category: 'Banking' },
+  { test: /@hdfcergo\.|@icicilombard\.|@bajajallianz\./i, category: 'Insurance/Vehicle' },
+  { test: /@mediassist\.|@starhealth\./i, category: 'Insurance/Health' },
+  { test: /@irctc\./i, category: 'Travel' },
+  { test: /@incometax\.|@tdscpc\.|@in\.gov/i, category: 'Tax' },
+  { test: /@uidai\.|@egov\./i, category: 'Identity' },
+];
+
+/** Filename substrings (without path) → category. */
+const FILENAME_HINTS: Array<{ test: RegExp; category: VaultCategory }> = [
+  { test: /aadhaar|aadhar/i, category: 'Identity' },
+  { test: /\bpan[_\s-]?card|\bpan\.pdf/i, category: 'Identity' },
+  { test: /form[_\s-]?16/i, category: 'Tax' },
+  { test: /26as|itr/i, category: 'Tax' },
+  { test: /salary|payslip/i, category: 'Tax' },
+  { test: /bank.*statement|statement.*\d{4}/i, category: 'Banking' },
+  { test: /credit.?card/i, category: 'Bills' },
+  { test: /policy|motor|vehicle|chassis/i, category: 'Insurance/Vehicle' },
+  { test: /boarding|pnr|ticket/i, category: 'Travel' },
+  { test: /invoice|receipt/i, category: 'Warranties' },
+  { test: /electricity|bescom|jio|airtel/i, category: 'Bills' },
+];
 
 export interface HeuristicInput {
   subject?: string;
@@ -63,13 +101,28 @@ export function shouldConsiderAttachment(input: HeuristicInput): boolean {
   return true;
 }
 
+function categoryFromSenderAndFilename(input: HeuristicInput): VaultCategory | undefined {
+  const from = input.from ?? '';
+  for (const rule of SENDER_DOMAIN_HINTS) {
+    if (rule.test.test(from)) return rule.category;
+  }
+  const baseName = (input.fileName ?? '').replace(/^.*[/\\]/, '');
+  for (const rule of FILENAME_HINTS) {
+    if (rule.test.test(baseName)) return rule.category;
+  }
+  return undefined;
+}
+
 /** Rule-based classification used when no AI key is configured. */
 export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string }): ClassificationResult {
   const haystack = [input.subject, input.from, input.fileName, input.textExcerpt, input.snippet]
     .filter(Boolean)
     .join(' \n ');
 
-  const category = normalizeCategory(haystack);
+  const hintCategory = categoryFromSenderAndFilename(input);
+  const normalized = normalizeCategory(haystack);
+  const category =
+    hintCategory && (normalized === 'Other' || hintCategory !== 'Other') ? hintCategory : normalized;
   const issuer = extractIssuer(input.from, haystack);
   const documentType = guessDocumentType(haystack, category);
   const referenceNumber = extractReference(haystack);
@@ -77,6 +130,7 @@ export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string
   const isImportant =
     DOC_HINT_PATTERNS.some((re) => re.test(haystack)) ||
     Boolean(referenceNumber) ||
+    Boolean(hintCategory) ||
     category !== 'Other';
 
   const title = buildTitle({
@@ -100,7 +154,11 @@ export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string
     metadata,
     confidence: isImportant ? 0.55 : 0.25,
     isImportantDocument: isImportant,
-    reason: isImportant ? 'Matched document keywords / patterns' : 'Weak document signals',
+    reason: isImportant
+      ? hintCategory
+        ? 'Matched sender/filename hints and document keywords'
+        : 'Matched document keywords / patterns'
+      : 'Weak document signals',
   };
 }
 
@@ -127,20 +185,28 @@ function extractIssuer(from?: string, haystack?: string): string | undefined {
       }
     }
   }
-  const known = /(geico|progressive|state farm|allstate|aetna|unitedhealthcare|chase|bank of america|wells fargo|irs|hmrc)/i.exec(
-    haystack ?? '',
-  );
+  const known =
+    /(geico|progressive|state farm|allstate|aetna|unitedhealthcare|chase|bank of america|wells fargo|irs|hmrc|hdfc|sbi|icici|axis|bajaj allianz|mediassist|irctc|uidai)/i.exec(
+      haystack ?? '',
+    );
   return known?.[1]?.replace(/\s+/g, ' ');
 }
 
 function guessDocumentType(haystack: string, category: VaultCategory): string {
   if (/renewal/i.test(haystack)) return 'Renewal notice';
+  if (/salary\s*slip|payslip/i.test(haystack)) return 'Salary slip';
+  if (/form\s*16/i.test(haystack)) return 'Form 16';
+  if (/26as/i.test(haystack)) return 'Form 26AS';
+  if (/aadhaar|aadhar/i.test(haystack)) return 'Aadhaar';
+  if (/\bpan\b/i.test(haystack)) return 'PAN card';
   if (/statement/i.test(haystack)) return 'Account statement';
+  if (/credit\s*card/i.test(haystack)) return 'Credit card statement';
   if (/invoice/i.test(haystack)) return 'Invoice';
   if (/receipt/i.test(haystack)) return 'Receipt';
   if (/policy/i.test(haystack)) return 'Policy document';
   if (/passport/i.test(haystack)) return 'Passport';
-  if (/tax|w-?2|1099/i.test(haystack)) return 'Tax document';
+  if (/tax|w-?2|1099|itr/i.test(haystack)) return 'Tax document';
+  if (/boarding|ticket|pnr/i.test(haystack)) return 'Travel ticket';
   if (category.startsWith('Insurance')) return 'Insurance document';
   if (category === 'Banking') return 'Banking document';
   return 'Document';

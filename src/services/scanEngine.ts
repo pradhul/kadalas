@@ -24,6 +24,7 @@ import { ScanCandidate, VaultIndex } from '../types/document';
 import { getAiService, ruleTriage } from './ai';
 import { isAuthError } from './auth/errors';
 import { getGmailService } from './gmail';
+import { yieldToUi } from '../lib/asyncUtils';
 import { clearScanJobState, loadScanJobState, saveScanJobState } from './scanPersist';
 import { useMocks } from './config';
 
@@ -31,6 +32,8 @@ export type ScanEngineListener = (state: ScanJobState) => void;
 
 const PERSIST_EVERY_STEPS = 5;
 const PERSIST_EVERY_MS = 15_000;
+/** Max UI notify rate (~4/sec) to reduce main-thread jank. */
+const EMIT_MIN_MS = 250;
 
 export class ScanEngine {
   private state: ScanJobState | null = null;
@@ -57,9 +60,39 @@ export class ScanEngine {
     return this.running;
   }
 
-  private emit(state: ScanJobState) {
+  private lastEmitAt = 0;
+  private pendingEmit: ScanJobState | null = null;
+  private emitTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private emit(state: ScanJobState, force = false) {
     this.state = state;
-    this.listeners.forEach((l) => l(state));
+    const terminal = ['completed', 'cancelled', 'paused_quota', 'paused_user', 'idle'].includes(
+      state.stage,
+    );
+    const shouldForce = force || terminal;
+    const now = Date.now();
+    if (shouldForce || now - this.lastEmitAt >= EMIT_MIN_MS) {
+      this.lastEmitAt = now;
+      this.pendingEmit = null;
+      if (this.emitTimer) {
+        clearTimeout(this.emitTimer);
+        this.emitTimer = null;
+      }
+      this.listeners.forEach((l) => l(state));
+      return;
+    }
+    this.pendingEmit = state;
+    if (!this.emitTimer) {
+      this.emitTimer = setTimeout(() => {
+        this.emitTimer = null;
+        if (this.pendingEmit) {
+          const s = this.pendingEmit;
+          this.pendingEmit = null;
+          this.lastEmitAt = Date.now();
+          this.listeners.forEach((l) => l(s));
+        }
+      }, EMIT_MIN_MS);
+    }
   }
 
   /** Public debug log for approve/skip failures (scan debug card). */
@@ -214,6 +247,8 @@ export class ScanEngine {
           } else {
             break;
           }
+          // Yield so React can paint progress between batches
+          await yieldToUi();
         } catch (err) {
           if (isAuthError(err)) {
             const next = pauseForAuth(this.state, {
