@@ -38,6 +38,8 @@ export class ScanEngine {
   private listeners = new Set<ScanEngineListener>();
   private stopRequested: 'pause' | 'cancel' | null = null;
   private vaultDocuments: VaultIndex['documents'] = [];
+  /** Gmail attachment keys the user previously skipped — never re-suggest. */
+  private skippedAttachmentIds = new Set<string>();
   private stepsSincePersist = 0;
   private lastPersistAt = 0;
 
@@ -92,6 +94,10 @@ export class ScanEngine {
     return loaded;
   }
 
+  setSkippedAttachmentIds(ids: Iterable<string>): void {
+    this.skippedAttachmentIds = new Set(ids);
+  }
+
   async start(options: {
     mode: ScanMode;
     lookbackDays?: number;
@@ -99,8 +105,12 @@ export class ScanEngine {
     vaultIndex: VaultIndex;
     /** In mock mode, force quota after N AI calls for demos */
     mockQuotaAfter?: number;
+    skippedAttachmentIds?: Iterable<string>;
   }): Promise<void> {
     this.vaultDocuments = options.vaultIndex.documents;
+    if (options.skippedAttachmentIds) {
+      this.skippedAttachmentIds = new Set(options.skippedAttachmentIds);
+    }
     if (options.mockQuotaAfter != null || useMocks()) {
       getAiService().__setMockQuotaFailAfter?.(options.mockQuotaAfter ?? 8);
     }
@@ -119,8 +129,14 @@ export class ScanEngine {
     await this.runLoop();
   }
 
-  async resume(vaultIndex: VaultIndex): Promise<void> {
+  async resume(
+    vaultIndex: VaultIndex,
+    options?: { skippedAttachmentIds?: Iterable<string> },
+  ): Promise<void> {
     this.vaultDocuments = vaultIndex.documents;
+    if (options?.skippedAttachmentIds) {
+      this.skippedAttachmentIds = new Set(options.skippedAttachmentIds);
+    }
     if (!this.state) await this.hydrate();
     if (!this.state) return;
     if (useMocks()) getAiService().__setMockQuotaFailAfter?.(3);
@@ -390,7 +406,7 @@ export class ScanEngine {
       contentHash,
       this.vaultDocuments,
       new Date().toISOString(),
-      { allowDemoPlates: useMocks() },
+      { allowDemoPlates: useMocks(), skippedAttachmentIds: this.skippedAttachmentIds },
     );
     this.emit({ ...next, lastStepAt: new Date().toISOString() });
   }

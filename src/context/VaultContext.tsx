@@ -1,5 +1,26 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { ClassificationResult, ScanCandidate, SyncSuggestion, VaultDocument, VaultIndex } from '../types/document';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ClassificationResult,
+  ScanCandidate,
+  SyncSuggestion,
+  VaultDocument,
+  VaultIndex,
+} from '../types/document';
+import {
+  attachmentSkipKey,
+  emptyReviewState,
+  mergeReviewCandidates,
+  reviewCounts,
+  ReviewState,
+} from '../types/review';
 import { ScanJobState, ScanMode } from '../types/scan';
 import { getDriveService } from '../services/drive';
 import {
@@ -9,9 +30,15 @@ import {
   syncDocumentFromGmail,
 } from '../services/vaultOps';
 import { clearScanJobState, getScanEngine } from '../services/scanEngine';
+import { loadReviewState, saveReviewState } from '../services/reviewPersist';
 import { rekeyDemoVehicleSubjects } from '../lib/rekeyDemoSubjects';
 import { useAuth } from './AuthContext';
 import { useMocks } from '../services/config';
+
+export type ApproveResult = {
+  folderPath: string;
+  fileName: string;
+};
 
 interface VaultContextValue {
   index: VaultIndex | null;
@@ -40,8 +67,13 @@ interface VaultContextValue {
   scanEngineRunning: boolean;
   /** @deprecated use startMailboxScan */
   runScan: (lookbackDays?: number) => Promise<ScanCandidate[]>;
-  approveCandidates: (ids: string[], subjectOverrides?: Record<string, string>) => Promise<void>;
-  rejectCandidate: (id: string) => void;
+  approveCandidates: (
+    ids: string[],
+    subjectOverrides?: Record<string, string>,
+  ) => Promise<ApproveResult[]>;
+  rejectCandidate: (id: string) => Promise<void>;
+  /** Restore a skipped item back to pending and remove from skipped-id set. */
+  restoreSkippedCandidate: (id: string) => Promise<void>;
   resolveAmbiguousSubject: (candidateId: string, subjectKey: string) => void;
   syncDocument: (docId: string) => Promise<SyncSuggestion | null>;
   confirmSync: (suggestion: SyncSuggestion) => Promise<void>;
@@ -52,6 +84,13 @@ interface VaultContextValue {
     classification: ClassificationResult;
   }) => Promise<VaultDocument>;
   search: (query: string) => VaultDocument[];
+  /** Counts for the review header */
+  reviewStats: { toReview: number; approved: number; skipped: number };
+  /** ISO time of last successful review-state Drive write (or vault index update). */
+  lastSyncedAt: string | null;
+  /** Open this URL to browse the Kadalas folder in Google Drive. */
+  vaultFolderUrl: string | null;
+  skippedAttachmentIds: string[];
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -96,6 +135,42 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [scanJob, setScanJob] = useState<ScanJobState | null>(null);
   const [lastScanCandidates, setLastScanCandidates] = useState<ScanCandidate[]>([]);
   const [scanEngineRunning, setScanEngineRunning] = useState(false);
+  const [reviewState, setReviewState] = useState<ReviewState>(emptyReviewState);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  const reviewRef = useRef(reviewState);
+  reviewRef.current = reviewState;
+  const candidatesRef = useRef(lastScanCandidates);
+  candidatesRef.current = lastScanCandidates;
+
+  const persistReview = useCallback(
+    async (partial: { candidates: ScanCandidate[]; skippedIds?: string[] }) => {
+      const base = reviewRef.current;
+      const fromRejected = partial.candidates
+        .filter((c) => c.status === 'rejected')
+        .map(attachmentSkipKey);
+      const prior = partial.skippedIds ?? base.skippedIds;
+      const keptPrior = prior.filter((id) => {
+        const still = partial.candidates.find((c) => attachmentSkipKey(c) === id);
+        return !still || still.status === 'rejected';
+      });
+      const uniqueSkipped = [...new Set([...fromRejected, ...keptPrior])];
+      const next: ReviewState = {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        candidates: partial.candidates,
+        skippedIds: uniqueSkipped,
+        lastSyncedAt: base.lastSyncedAt,
+      };
+      const saved = await saveReviewState(next);
+      reviewRef.current = saved;
+      setReviewState(saved);
+      setLastSyncedAt(saved.lastSyncedAt);
+      getScanEngine().setSkippedAttachmentIds(saved.skippedIds);
+      return saved;
+    },
+    [],
+  );
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -108,14 +183,26 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       const drive = getDriveService();
       await drive.ensureVaultStructure();
       let next = await drive.loadIndex();
-      // Real vaults: strip leaked demo plate subjects from index metadata only
-      // (never delete Drive files). Mock/demo vaults keep sample vehicles.
       const migrated = rekeyDemoVehicleSubjects(next, useMocks());
       if (migrated.changed) {
         await drive.saveIndex(migrated.index);
         next = migrated.index;
       }
       setIndex(next);
+      if (next.updatedAt) setLastSyncedAt((prev) => prev ?? next.updatedAt);
+
+      const review = await loadReviewState();
+      reviewRef.current = review;
+      setReviewState(review);
+      if (review.lastSyncedAt) setLastSyncedAt(review.lastSyncedAt);
+      getScanEngine().setSkippedAttachmentIds(review.skippedIds);
+
+      // Restore review queue when scan-state is empty / older
+      if (review.candidates.length) {
+        setLastScanCandidates((prev) =>
+          prev.length ? mergeReviewCandidates(prev, review) : review.candidates,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -129,21 +216,43 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const engine = getScanEngine();
-    void engine.hydrate().then((s) => {
+    void (async () => {
+      const review = await loadReviewState();
+      reviewRef.current = review;
+      setReviewState(review);
+      if (review.lastSyncedAt) setLastSyncedAt(review.lastSyncedAt);
+      engine.setSkippedAttachmentIds(review.skippedIds);
+
+      const s = await engine.hydrate();
       if (s) {
         setScanJob(s);
-        setLastScanCandidates(s.candidates);
+        const merged = mergeReviewCandidates(s.candidates, review);
+        setLastScanCandidates(merged);
+        // Prefer richer merged queue if review had decisions
+        if (review.candidates.length || review.skippedIds.length) {
+          void persistReview({ candidates: merged, skippedIds: review.skippedIds });
+        }
+      } else if (review.candidates.length) {
+        setLastScanCandidates(review.candidates);
       }
       setScanEngineRunning(engine.isRunning());
-    });
+    })();
+
     return engine.subscribe((state) => {
       setScanJob({ ...state });
-      setLastScanCandidates([...state.candidates]);
+      const merged = mergeReviewCandidates(state.candidates, reviewRef.current);
+      setLastScanCandidates(merged);
       setScanEngineRunning(engine.isRunning());
+      // Flush review queue to Drive when the scan finishes (approve/skip persist immediately).
+      if (state.stage === 'completed' || state.stage === 'cancelled') {
+        void persistReview({
+          candidates: merged,
+          skippedIds: reviewRef.current.skippedIds,
+        });
+      }
     });
-  }, []);
+  }, [persistReview]);
 
-  // Poll isRunning so the UI notices a dead loop even if stage still looks active.
   useEffect(() => {
     const t = setInterval(() => {
       setScanEngineRunning(getScanEngine().isRunning());
@@ -151,15 +260,15 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(t);
   }, []);
 
-  // Auto-resume after quota pause when resumeAfter has passed and app is open.
-  // Skip auth (401) pauses — those need an interactive Google reconnect first.
   useEffect(() => {
     if (!scanJob || scanJob.stage !== 'paused_quota' || !scanJob.quotaPause || !index) return;
     if (scanJob.quotaPause.httpStatus === 401) return;
     const resumeAt = new Date(scanJob.quotaPause.resumeAfter).getTime();
     const delay = Math.max(0, resumeAt - Date.now());
     const t = setTimeout(() => {
-      void getScanEngine().resume(index);
+      void getScanEngine().resume(index, {
+        skippedAttachmentIds: reviewRef.current.skippedIds,
+      });
     }, delay + 50);
     return () => clearTimeout(t);
   }, [scanJob, index]);
@@ -168,6 +277,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const drive = getDriveService();
     const next = await drive.upsertDocument(doc);
     setIndex(next);
+    setLastSyncedAt(next.updatedAt);
   }, []);
 
   const startMailboxScan = useCallback(
@@ -181,8 +291,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         lookbackDays: options.lookbackDays,
         sinceIso: options.mode === 'incremental' ? index.lastScanAt : null,
         vaultIndex: index,
-        // Fail quickly in mocks so progress → quota-pause is easy to demo
         mockQuotaAfter: options.mockQuotaAfter ?? (useMocks() ? 1 : undefined),
+        skippedAttachmentIds: reviewRef.current.skippedIds,
       });
     },
     [index],
@@ -192,7 +302,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     if (!index) {
       throw new Error('Vault not loaded from Google Drive — reconnect');
     }
-    await getScanEngine().resume(index);
+    await getScanEngine().resume(index, {
+      skippedAttachmentIds: reviewRef.current.skippedIds,
+    });
   }, [index]);
 
   const pauseMailboxScan = useCallback(async () => {
@@ -206,7 +318,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const resetMailboxScan = useCallback(async () => {
     await getScanEngine().reset();
     setScanJob(null);
-    setLastScanCandidates([]);
+    // Keep skipped ids; clear only the active scan job. Review queue stays for decisions.
     setScanEngineRunning(false);
   }, []);
 
@@ -222,31 +334,34 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   );
 
   const approveCandidates = useCallback(
-    async (ids: string[], subjectOverrides?: Record<string, string>) => {
+    async (ids: string[], subjectOverrides?: Record<string, string>): Promise<ApproveResult[]> => {
       const selected = lastScanCandidates.filter(
         (c) =>
           ids.includes(c.id) &&
           (c.status === 'pending' || c.status === 'needs_subject_confirm') &&
           c.isGroupLatest !== false,
       );
-      // Also include currentDocs that are latest even if isGroupLatest undefined
       const toSave = selected.length
         ? selected
         : lastScanCandidates.filter((c) => ids.includes(c.id) && c.status === 'pending');
 
+      const results: ApproveResult[] = [];
       for (const raw of toSave) {
         const overrideKey = subjectOverrides?.[raw.id];
-        const candidate = overrideKey
-          ? applySubjectOverride(raw, overrideKey)
-          : raw;
-        // Older versions in the same group become Drive version history via apply path
+        const candidate = overrideKey ? applySubjectOverride(raw, overrideKey) : raw;
         const older = lastScanCandidates.filter(
-          (c) => c.groupId && c.groupId === candidate.groupId && c.id !== candidate.id && c.status === 'duplicate',
+          (c) =>
+            c.groupId &&
+            c.groupId === candidate.groupId &&
+            c.id !== candidate.id &&
+            c.status === 'duplicate',
         );
-        await saveCandidateToVault(candidate);
-        // Store older as additional versions on the same doc when possible
+        const saved = await saveCandidateToVault(candidate);
+        results.push({
+          folderPath: `Kadalas/${saved.category}`,
+          fileName: saved.title || candidate.fileName,
+        });
         for (const old of older) {
-          // Best-effort: save as separate historical files under _versions only when approving group latest
           try {
             await saveCandidateToVault({ ...old, status: 'pending' });
           } catch {
@@ -254,13 +369,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
-      setLastScanCandidates((prev) =>
-        prev.map((c) =>
-          ids.includes(c.id) || (c.duplicateOfId && ids.includes(c.duplicateOfId))
-            ? { ...c, status: 'approved' as const }
-            : c,
-        ),
+
+      const nextCandidates = lastScanCandidates.map((c) =>
+        ids.includes(c.id) || (c.duplicateOfId && ids.includes(c.duplicateOfId))
+          ? { ...c, status: 'approved' as const }
+          : c,
       );
+      setLastScanCandidates(nextCandidates);
+      await persistReview({
+        candidates: nextCandidates,
+        skippedIds: reviewRef.current.skippedIds,
+      });
+
       if (index) {
         const drive = getDriveService();
         const next = {
@@ -270,51 +390,65 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         };
         await drive.saveIndex(next);
         setIndex(next);
+        setLastSyncedAt(next.updatedAt);
       }
       await refresh();
+      return results;
     },
-    [lastScanCandidates, index, refresh],
+    [lastScanCandidates, index, refresh, persistReview],
   );
 
-  const rejectCandidate = useCallback((id: string) => {
-    setLastScanCandidates((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, status: 'rejected' as const } : c)),
-    );
-  }, []);
+  const rejectCandidate = useCallback(
+    async (id: string) => {
+      const target = candidatesRef.current.find((c) => c.id === id);
+      const nextCandidates = candidatesRef.current.map((c) =>
+        c.id === id ? { ...c, status: 'rejected' as const } : c,
+      );
+      setLastScanCandidates(nextCandidates);
+      const skippedIds = [...reviewRef.current.skippedIds];
+      if (target) {
+        const key = attachmentSkipKey(target);
+        if (!skippedIds.includes(key)) skippedIds.push(key);
+      }
+      await persistReview({ candidates: nextCandidates, skippedIds });
+    },
+    [persistReview],
+  );
+
+  const restoreSkippedCandidate = useCallback(
+    async (id: string) => {
+      const target = candidatesRef.current.find((c) => c.id === id);
+      const nextCandidates = candidatesRef.current.map((c) =>
+        c.id === id ? { ...c, status: 'pending' as const } : c,
+      );
+      setLastScanCandidates(nextCandidates);
+      const key = target ? attachmentSkipKey(target) : null;
+      const skippedIds = reviewRef.current.skippedIds.filter((k) => k !== key);
+      await persistReview({ candidates: nextCandidates, skippedIds });
+    },
+    [persistReview],
+  );
 
   const resolveAmbiguousSubject = useCallback((candidateId: string, subjectKey: string) => {
     setLastScanCandidates((prev) =>
       prev.map((c) => {
         if (c.id !== candidateId || !c.classification) return c;
-        const label = subjectKey.replace(/^vehicle:reg:/, '').replace(/^vehicle:chassis:/, '');
-        return {
-          ...c,
-          status: 'pending' as const,
-          subjectAmbiguous: false,
-          groupId: `vehicle_insurance::${subjectKey}`,
-          groupLabel: label,
-          classification: {
-            ...c.classification,
-            metadata: {
-              ...c.classification.metadata,
-              subjectKey,
-              subjectLabel: label,
-              subjectConfidence: '1',
-              registrationNumber:
-                c.classification.metadata.registrationNumber ||
-                (subjectKey.startsWith('vehicle:reg:')
-                  ? subjectKey.replace('vehicle:reg:', '')
-                  : c.classification.metadata.registrationNumber),
-            },
-          },
-        };
+        return applySubjectOverride(c, subjectKey);
       }),
     );
   }, []);
 
-  const seedScanCandidates = useCallback((candidates: ScanCandidate[]) => {
-    setLastScanCandidates(candidates);
-  }, []);
+  const seedScanCandidates = useCallback(
+    (candidates: ScanCandidate[]) => {
+      const merged = mergeReviewCandidates(candidates, reviewRef.current);
+      setLastScanCandidates(merged);
+      void persistReview({
+        candidates: merged,
+        skippedIds: reviewRef.current.skippedIds,
+      });
+    },
+    [persistReview],
+  );
 
   const syncDocument = useCallback(
     async (docId: string) => {
@@ -384,6 +518,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     };
   }, [scanJob]);
 
+  const vaultFolderUrl = useMemo(() => {
+    if (!index?.vaultFolderId) return null;
+    if (useMocks()) return null;
+    return `https://drive.google.com/drive/folders/${index.vaultFolderId}`;
+  }, [index?.vaultFolderId]);
+
+  const reviewStats = useMemo(() => reviewCounts(lastScanCandidates), [lastScanCandidates]);
+
   const value = useMemo<VaultContextValue>(
     () => ({
       index,
@@ -406,11 +548,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       runScan,
       approveCandidates,
       rejectCandidate,
+      restoreSkippedCandidate,
       resolveAmbiguousSubject,
       syncDocument,
       confirmSync,
       addDocument,
       search,
+      reviewStats,
+      lastSyncedAt,
+      vaultFolderUrl,
+      skippedAttachmentIds: reviewState.skippedIds,
     }),
     [
       index,
@@ -431,11 +578,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       runScan,
       approveCandidates,
       rejectCandidate,
+      restoreSkippedCandidate,
       resolveAmbiguousSubject,
       syncDocument,
       confirmSync,
       addDocument,
       search,
+      reviewStats,
+      lastSyncedAt,
+      vaultFolderUrl,
+      reviewState.skippedIds,
     ],
   );
 

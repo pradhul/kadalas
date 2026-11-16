@@ -9,6 +9,7 @@ import {
   VaultIndex,
 } from '../../types/document';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
+import { REVIEW_STATE_FILENAME } from '../../types/review';
 import { SCAN_STATE_FILENAME, ScanJobState } from '../../types/scan';
 import { getAuthService } from '../auth';
 import { DriveFileRef, DriveService, UploadInput } from './types';
@@ -267,6 +268,41 @@ export function createGoogleDriveService(): DriveService {
       const parsed: unknown = await res.json();
       if (parsed == null) return null;
       return parsed as ScanJobState;
+    },
+
+    async saveReviewState(state) {
+      const s = await ensureStructure();
+      const existingId = await findNamedFile(s.vaultFolderId, REVIEW_STATE_FILENAME);
+      const body = JSON.stringify(state);
+      // Never trash/delete — create once, then overwrite in place.
+      if (!existingId) {
+        const form = buildMultipart(
+          { name: REVIEW_STATE_FILENAME, parents: [s.vaultFolderId], mimeType: 'application/json' },
+          body,
+          'application/json',
+        );
+        await driveFetch(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${form.boundary}` },
+          body: form.body,
+        });
+        return;
+      }
+      await driveFetch(`${UPLOAD}/files/${existingId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    },
+
+    async loadReviewState() {
+      const s = await ensureStructure();
+      const id = await findNamedFile(s.vaultFolderId, REVIEW_STATE_FILENAME);
+      if (!id) return null;
+      const res = await driveFetch(`${DRIVE}/files/${id}?alt=media`);
+      const parsed: unknown = await res.json();
+      if (parsed == null) return null;
+      return parsed as import('../../types/review').ReviewState;
     },
   };
 }

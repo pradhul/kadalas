@@ -252,7 +252,7 @@ export function applyClassificationResult(
   contentHash: string | undefined,
   vaultDocuments: VaultDocument[],
   nowIso: string = new Date().toISOString(),
-  enrichOptions: { allowDemoPlates?: boolean } = {},
+  enrichOptions: { allowDemoPlates?: boolean; skippedAttachmentIds?: Set<string> | string[] } = {},
 ): ScanJobState {
   const item = state.items[itemId];
   if (!item) return state;
@@ -267,6 +267,13 @@ export function applyClassificationResult(
 
   const att = item.attachment;
   if (!att) return state;
+  const skipKey = `${att.messageId}::${att.attachmentId}`;
+  const skippedSet =
+    enrichOptions.skippedAttachmentIds instanceof Set
+      ? enrichOptions.skippedAttachmentIds
+      : new Set(enrichOptions.skippedAttachmentIds ?? []);
+  const previouslySkipped = skippedSet.has(skipKey);
+
   let candidate: ScanCandidate = {
     id: `cand_${itemId.replace(/[^a-zA-Z0-9]/g, '_')}`,
     gmailMessageId: att.messageId,
@@ -280,13 +287,20 @@ export function applyClassificationResult(
     previewSnippet: att.snippet,
     classification: finalClassification,
     contentRef: contentHash,
-    status: finalClassification.isImportantDocument ? 'pending' : 'skipped',
+    status: previouslySkipped
+      ? 'rejected'
+      : finalClassification.isImportantDocument
+        ? 'pending'
+        : 'skipped',
   };
   const subjectOpts = {
     vaultDocuments,
     allowDemoPlates: Boolean(enrichOptions.allowDemoPlates),
   };
   candidate = enrichCandidateWithSubject(candidate, subjectOpts);
+  if (previouslySkipped) {
+    candidate = { ...candidate, status: 'rejected' };
+  }
 
   const dup = findDuplicateInVault(
     {
@@ -299,7 +313,7 @@ export function applyClassificationResult(
   );
 
   // Also treat same subject+type against already-found candidates as version, not separate
-  if (dup.isDuplicate) {
+  if (dup.isDuplicate && !previouslySkipped) {
     candidate = {
       ...candidate,
       status: 'duplicate',

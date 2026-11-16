@@ -36,6 +36,8 @@ export default function ScanScreen() {
     cancelMailboxScan,
     resetMailboxScan,
     scanEngineRunning,
+    lastSyncedAt,
+    reviewStats,
   } = useVault();
   const { reconnectGoogle, loading: authLoading, needsReconnect, session } = useAuth();
   const [lookback, setLookback] = useState('90');
@@ -350,12 +352,23 @@ export default function ScanScreen() {
           ) : null}
 
           {lastScanCandidates.length ? (
-            <View style={{ marginTop: spacing.md }}>
+            <View style={{ marginTop: spacing.md, gap: 6 }}>
               <Button
                 title={`Open review list (${pendingReview} pending)`}
                 variant="secondary"
                 onPress={() => router.push('/scan-review')}
               />
+              <Text style={styles.meta}>
+                {reviewStats.toReview} to review · {reviewStats.approved} approved ·{' '}
+                {reviewStats.skipped} skipped
+                {lastSyncedAt
+                  ? ` · review queue synced ${new Date(lastSyncedAt).toLocaleString()}`
+                  : ''}
+              </Text>
+              <Text style={styles.meta}>
+                Approvals save to Google Drive immediately. Skips and the review queue restore after
+                you close the app.
+              </Text>
             </View>
           ) : null}
         </ScrollView>

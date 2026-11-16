@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-11-16
+
+### Fixed
+
+- Scan review Skip now shows a snackbar with **Undo** (5s) and collapses into a Skipped row; Approve shows “Saved to your Google Drive › Kadalas/…”
+- Review header counts: `N to review · N approved · N skipped`, plus a **Show skipped** toggle to restore
+- Review queue + skip decisions persist to Drive `review-state.json` (overwrite only) with localStorage as a fast cache — survives close/reopen
+- Previously skipped Gmail attachments are never re-suggested by future scans (`skippedIds`)
+
+### Added
+
+- Persistent safety note on Home and Review: approvals live in Google Drive; closing the app is safe; last-synced time + open Drive folder link
+
+### Changed
+
+- Version bump to **0.1.6**
+
 ## [0.1.5] - 2026-11-16
 
 ### Fixed
@@ -117,6 +134,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.1.6]: https://github.com/pradhul/kadalas/releases/tag/v0.1.6
 [0.1.5]: https://github.com/pradhul/kadalas/releases/tag/v0.1.5
 [0.1.4]: https://github.com/pradhul/kadalas/releases/tag/v0.1.4
 [0.1.3]: https://github.com/pradhul/kadalas/releases/tag/v0.1.3

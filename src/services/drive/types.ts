@@ -1,4 +1,5 @@
 import { VaultCategory, VaultDocument, VaultIndex } from '../../types/document';
+import { ReviewState } from '../../types/review';
 import { ScanJobState } from '../../types/scan';
 
 export interface DriveFileRef {
@@ -34,4 +35,7 @@ export interface DriveService {
   upsertDocument(doc: VaultDocument): Promise<VaultIndex>;
   saveScanState(state: ScanJobState | null): Promise<void>;
   loadScanState(): Promise<ScanJobState | null>;
+  /** Overwrite-only review queue + skipped ids (never trash). */
+  saveReviewState(state: ReviewState): Promise<void>;
+  loadReviewState(): Promise<ReviewState | null>;
 }

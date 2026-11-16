@@ -9,6 +9,7 @@ import {
   VaultIndex,
 } from '../../types/document';
 import { MOCK_VAULT_INDEX } from '../../mocks/data';
+import { ReviewState } from '../../types/review';
 import { ScanJobState } from '../../types/scan';
 import { DriveFileRef, DriveService, UploadInput } from './types';
 
@@ -20,6 +21,7 @@ interface MockState {
   files: Record<string, DriveFileRef & { content?: string; parentId: string }>;
   index: VaultIndex;
   scanState: ScanJobState | null;
+  reviewState: ReviewState | null;
 }
 
 function emptyState(): MockState {
@@ -45,6 +47,7 @@ function emptyState(): MockState {
   return {
     vaultFolderId,
     folderIdsByPath,
+    reviewState: null,
     files: {
       mock_index: {
         id: 'mock_index',
@@ -64,7 +67,9 @@ function loadState(): MockState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       try {
-        return JSON.parse(raw) as MockState;
+        const parsed = JSON.parse(raw) as Partial<MockState> & MockState;
+        if (parsed.reviewState === undefined) parsed.reviewState = null;
+        return parsed as MockState;
       } catch {
         // fall through
       }
@@ -179,6 +184,15 @@ export function createMockDriveService(): DriveService {
 
     async loadScanState() {
       return memory.scanState ? structuredClone(memory.scanState) : null;
+    },
+
+    async saveReviewState(state) {
+      memory.reviewState = structuredClone(state);
+      saveState(memory);
+    },
+
+    async loadReviewState() {
+      return memory.reviewState ? structuredClone(memory.reviewState) : null;
     },
   };
 }

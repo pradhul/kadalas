@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { DriveSafetyNote } from '../../components/DriveSafetyNote';
 import { BrandMark, Button, Chip, EmptyState, Screen } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
@@ -21,7 +22,7 @@ import { VAULT_CATEGORIES, VaultCategory } from '../../types/document';
 
 export default function VaultHomeScreen() {
   const { session, isMock } = useAuth();
-  const { documents, loading, error, refresh } = useVault();
+  const { documents, loading, error, refresh, lastSyncedAt, vaultFolderUrl } = useVault();
   const { width } = useWindowDimensions();
   const columns = width >= 900 ? 3 : width >= 600 ? 2 : 1;
   const fade = useRef(new Animated.Value(0)).current;
@@ -64,6 +65,7 @@ export default function VaultHomeScreen() {
             {isMock ? ' · mock Drive' : ' · Google Drive'}
           </Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          <DriveSafetyNote vaultFolderUrl={vaultFolderUrl} lastSyncedAt={lastSyncedAt} />
         </Animated.View>
 
         {loading && !documents.length ? (
