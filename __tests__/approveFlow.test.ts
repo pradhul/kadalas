@@ -93,6 +93,7 @@ describe('runApproveFlow', () => {
       title: c.classification!.title,
       driveFileId: 'drive_file_123',
       webViewLink: 'https://drive.google.com/file/d/drive_file_123/view',
+      storageKind: 'drive_copy' as const,
     }));
     const result = await runApproveFlow({
       ids: ['ok'],
@@ -106,12 +107,13 @@ describe('runApproveFlow', () => {
     expect(result.saved[0].driveFileId).toBe('drive_file_123');
     expect(result.saved[0].folderPath).toBe('Kadalas/Insurance/Health');
     expect(result.saved[0].webViewLink).toContain('drive_file_123');
+    expect(result.saved[0].message).toMatch(/Saved to your Google Drive/i);
     expect(result.candidates[0].status).toBe('approved');
     expect(result.candidates[0].driveFileId).toBe('drive_file_123');
     expect(result.failed).toHaveLength(0);
   });
 
-  it('rejects uploads that return no file id', async () => {
+  it('approves gmail_index saves without a Drive file id', async () => {
     const result = await runApproveFlow({
       ids: ['x'],
       candidates: [cand('x')],
@@ -120,6 +122,26 @@ describe('runApproveFlow', () => {
         category: 'Banking',
         title: 'x',
         driveFileId: '',
+        storageKind: 'gmail_index',
+      }),
+    });
+    expect(result.saved).toHaveLength(1);
+    expect(result.saved[0].storageKind).toBe('gmail_index');
+    expect(result.saved[0].message).toBe('Saved to your vault');
+    expect(result.candidates[0].status).toBe('approved');
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('rejects drive_copy uploads that return no file id', async () => {
+    const result = await runApproveFlow({
+      ids: ['x'],
+      candidates: [cand('x')],
+      applySubjectOverride: (c) => c,
+      save: async () => ({
+        category: 'Banking',
+        title: 'x',
+        driveFileId: '',
+        storageKind: 'drive_copy',
       }),
     });
     expect(result.saved).toHaveLength(0);

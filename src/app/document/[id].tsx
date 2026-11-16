@@ -1,11 +1,13 @@
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { Alert, Linking, Platform, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { Banner, Button, Chip, Field, Screen } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useVault } from '../../context/VaultContext';
+import { isGmailIndexVersion, openDocumentContent } from '../../lib/documentContent';
 import { getCurrentVersion, listVersionHistory } from '../../lib/versioning';
-import { getDriveService } from '../../services/drive';
+import { isAvailableOffline, removeOfflineBlob } from '../../services/offlineCache';
+import { loadDeviceSettings } from '../../services/settingsPersist';
 import { SyncSuggestion, VAULT_CATEGORIES, VaultCategory } from '../../types/document';
 
 export default function DocumentDetailScreen() {
@@ -25,10 +27,19 @@ export default function DocumentDetailScreen() {
   const [syncing, setSyncing] = useState(false);
   const [suggestion, setSuggestion] = useState<SyncSuggestion | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [keepOffline, setKeepOffline] = useState(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: doc?.title || 'Document' });
   }, [navigation, doc?.title]);
+
+  useEffect(() => {
+    if (!doc) return;
+    const ver = getCurrentVersion(doc);
+    setOffline(ver ? isAvailableOffline(doc.id, ver.id) : false);
+    void loadDeviceSettings().then((s) => setKeepOffline(s.keepDocumentsOnDevice));
+  }, [doc]);
 
   if (!doc) {
     return (
@@ -87,18 +98,47 @@ export default function DocumentDetailScreen() {
           <Text style={styles.blockTitle}>Current file</Text>
           <Text style={styles.meta}>{current?.fileName}</Text>
           <Text style={styles.meta}>{current?.mimeType} · {(current?.sizeBytes || 0).toLocaleString()} bytes</Text>
+          <Text style={styles.meta}>
+            {isGmailIndexVersion(current)
+              ? 'Stored as Gmail index (opens live from email)'
+              : current?.driveFileId
+                ? 'Stored as Drive copy'
+                : 'Storage unknown'}
+            {offline ? ' · available offline' : ''}
+          </Text>
           <View style={styles.row}>
             <Button
               title="Preview / download"
               variant="secondary"
               onPress={async () => {
-                if (!current) return;
-                const url = await getDriveService().getDownloadUrl(current.driveFileId);
-                if (url.startsWith('mock://')) {
-                  setStatus('Mock file — no remote preview URL.');
+                setStatus(null);
+                const result = await openDocumentContent(doc, { cacheOffline: keepOffline });
+                if (!result.ok) {
+                  setStatus(result.error);
                   return;
                 }
-                await Linking.openURL(url);
+                if (result.openUrl) {
+                  if (result.openUrl.startsWith('mock://')) {
+                    setStatus('Mock file — no remote preview URL.');
+                    return;
+                  }
+                  await Linking.openURL(result.openUrl);
+                  setStatus(`Opened from ${result.source}`);
+                  return;
+                }
+                if (result.dataBase64 && Platform.OS === 'web' && typeof document !== 'undefined') {
+                  const binary = atob(result.dataBase64);
+                  const bytes = new Uint8Array(binary.length);
+                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                  const blob = new Blob([bytes], { type: result.mimeType || 'application/octet-stream' });
+                  const url = URL.createObjectURL(blob);
+                  await Linking.openURL(url);
+                  setStatus(`Opened from ${result.source}`);
+                  if (current) setOffline(isAvailableOffline(doc.id, current.id) || keepOffline);
+                  return;
+                }
+                setStatus(`Loaded from ${result.source} (${result.fileName})`);
+                if (current) setOffline(isAvailableOffline(doc.id, current.id) || keepOffline);
               }}
             />
             <Button
@@ -114,6 +154,17 @@ export default function DocumentDetailScreen() {
               }}
             />
           </View>
+          {offline && current ? (
+            <Button
+              title="Remove offline copy"
+              variant="ghost"
+              onPress={async () => {
+                await removeOfflineBlob(doc.id, current.id);
+                setOffline(false);
+                setStatus('Removed local copy only (Gmail/Drive untouched).');
+              }}
+            />
+          ) : null}
         </View>
 
         <View style={styles.block}>

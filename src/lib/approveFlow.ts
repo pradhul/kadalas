@@ -1,4 +1,5 @@
 import { ScanCandidate, VaultDocument } from '../types/document';
+import { StorageKind } from '../types/settings';
 
 export type ApproveSuccess = {
   candidateId: string;
@@ -6,6 +7,8 @@ export type ApproveSuccess = {
   fileName: string;
   driveFileId: string;
   webViewLink?: string;
+  storageKind: StorageKind;
+  message: string;
 };
 
 export type ApproveFailure = {
@@ -24,6 +27,7 @@ export type SavedVaultFile = {
   title: string;
   driveFileId: string;
   webViewLink?: string;
+  storageKind: StorageKind;
 };
 
 const APPROVABLE = new Set(['pending', 'needs_subject_confirm']);
@@ -63,8 +67,8 @@ export function selectCandidatesToApprove(
 }
 
 /**
- * Upload each selected candidate. Only mark a candidate `approved` when save()
- * returns a Drive file id. Failures stay pending with saveError set.
+ * Save each selected candidate. Drive-copy mode requires a Drive file id.
+ * Gmail-index mode only requires a successful index write (driveFileId may be empty).
  */
 export async function runApproveFlow(input: {
   ids: string[];
@@ -78,13 +82,13 @@ export async function runApproveFlow(input: {
     return {
       candidates: input.candidates.map((c) =>
         input.ids.includes(c.id)
-          ? { ...c, saveError: emptyReason ?? 'Nothing to save to Drive' }
+          ? { ...c, saveError: emptyReason ?? 'Nothing to save' }
           : c,
       ),
       saved: [],
       failed: input.ids.map((id) => ({
         candidateId: id,
-        reason: emptyReason ?? 'Nothing to save to Drive',
+        reason: emptyReason ?? 'Nothing to save',
       })),
     };
   }
@@ -100,21 +104,28 @@ export async function runApproveFlow(input: {
       : raw;
     try {
       const file = await input.save(candidate);
-      if (!file.driveFileId) {
+      const kind: StorageKind = file.storageKind || (file.driveFileId ? 'drive_copy' : 'gmail_index');
+      if (kind === 'drive_copy' && !file.driveFileId) {
         throw new Error('Drive upload returned no file id');
       }
+      const message =
+        kind === 'gmail_index'
+          ? 'Saved to your vault'
+          : `Saved to your Google Drive › Kadalas/${file.category}`;
       saved.push({
         candidateId: raw.id,
         folderPath: `Kadalas/${file.category}`,
         fileName: file.title || candidate.fileName,
-        driveFileId: file.driveFileId,
+        driveFileId: file.driveFileId || '',
         webViewLink: file.webViewLink,
+        storageKind: kind,
+        message,
       });
       byId.set(raw.id, {
         ...candidate,
         status: 'approved',
         saveError: undefined,
-        driveFileId: file.driveFileId,
+        driveFileId: file.driveFileId || undefined,
         driveWebViewLink: file.webViewLink,
       });
     } catch (e) {
@@ -165,7 +176,7 @@ export function reclaimFalseApprovals(
     return {
       ...c,
       status: 'pending' as const,
-      saveError: 'Previously marked approved but no Drive file was found — tap Approve to save again.',
+      saveError: 'Previously marked approved but no vault entry was found — tap Approve to save again.',
     };
   });
   return { candidates: next, reclaimedIds };

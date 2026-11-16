@@ -1,3 +1,5 @@
+import type { StorageKind, StorageMode } from './settings';
+
 /** Vault category paths that map to Google Drive folders. */
 export type VaultCategory =
   | 'Insurance/Vehicle'
@@ -71,7 +73,13 @@ export interface DocumentMetadata {
 
 export interface DocumentVersion {
   id: string;
+  /**
+   * Drive file id when a copy was uploaded.
+   * Empty string for gmail_index entries (bytes stay in Gmail until opened).
+   */
   driveFileId: string;
+  /** Where bytes live: gmail_index (default for new Approves) or drive_copy. */
+  storageKind?: StorageKind;
   fileName: string;
   mimeType: string;
   hash: string;
@@ -80,6 +88,12 @@ export interface DocumentVersion {
   source: 'upload' | 'gmail' | 'sync';
   gmailMessageId?: string;
   gmailAttachmentId?: string;
+  /** Sender captured at index time (gmail_index). */
+  gmailFrom?: string;
+  /** Email subject captured at index time. */
+  gmailSubject?: string;
+  /** Email date captured at index time (ISO). */
+  gmailDate?: string;
 }
 
 export interface VaultDocument {
@@ -101,6 +115,10 @@ export interface VaultIndex {
   lastScanAt: string | null;
   documents: VaultDocument[];
   updatedAt: string;
+  /** User preferences stored in the tiny vault-index.json (overwrite only). */
+  settings?: {
+    storageMode?: StorageMode;
+  };
 }
 
 export interface ClassificationResult {

@@ -228,22 +228,90 @@ export type SaveCandidateResult = {
   webViewLink?: string;
   parentFolderId: string;
   category: VaultDocument['category'];
+  storageKind: 'gmail_index' | 'drive_copy';
 };
 
-export async function saveCandidateToVault(
+function classificationForCandidate(
   candidate: ScanCandidate,
   overrides?: Partial<ClassificationResult>,
-): Promise<SaveCandidateResult> {
-  const drive = getDriveService();
-  const gmail = getGmailService();
-  const classification = {
-    ...(candidate.classification || classifyWithRules({ fileName: candidate.fileName, subject: candidate.subject })),
+) {
+  return {
+    ...(candidate.classification ||
+      classifyWithRules({ fileName: candidate.fileName, subject: candidate.subject })),
     ...overrides,
     metadata: {
       ...(candidate.classification?.metadata || {}),
       ...(overrides?.metadata || {}),
     },
   };
+}
+
+/**
+ * Gmail-index mode: write a tiny vault index entry only — do NOT upload bytes to Drive.
+ * Opening the document later fetches users.messages.attachments.get live.
+ */
+export async function indexCandidateInVault(
+  candidate: ScanCandidate,
+  overrides?: Partial<ClassificationResult>,
+): Promise<SaveCandidateResult> {
+  const drive = getDriveService();
+  const classification = classificationForCandidate(candidate, overrides);
+
+  if (!candidate.gmailMessageId || !candidate.gmailAttachmentId) {
+    throw new Error('Missing Gmail message/attachment id — cannot index the file');
+  }
+
+  const hash =
+    candidate.contentRef ||
+    `gmail:${candidate.gmailMessageId}:${candidate.gmailAttachmentId}`;
+
+  const doc = createInitialDocument({
+    title: classification.title || candidate.fileName,
+    category: classification.category,
+    metadata: {
+      ...classification.metadata,
+      subjectKey: classification.metadata.subjectKey,
+      subjectLabel: classification.metadata.subjectLabel,
+    },
+    driveFolderPath: classification.category,
+    version: {
+      driveFileId: '',
+      storageKind: 'gmail_index',
+      fileName: candidate.fileName,
+      mimeType: candidate.mimeType || 'application/octet-stream',
+      hash,
+      sizeBytes: candidate.sizeBytes,
+      createdAt: candidate.date || new Date().toISOString(),
+      source: 'gmail',
+      gmailMessageId: candidate.gmailMessageId,
+      gmailAttachmentId: candidate.gmailAttachmentId,
+      gmailFrom: candidate.from,
+      gmailSubject: candidate.subject,
+      gmailDate: candidate.date,
+    },
+  });
+
+  await drive.upsertDocument(doc);
+  // Ensure vault folder structure exists so index JSON has a home — no file upload.
+  const structure = await drive.ensureVaultStructure();
+  return {
+    document: doc,
+    driveFileId: '',
+    webViewLink: undefined,
+    parentFolderId: structure.vaultFolderId,
+    category: classification.category,
+    storageKind: 'gmail_index',
+  };
+}
+
+/** Drive-copies mode: download from Gmail and upload a copy into Kadalas/. */
+export async function saveCandidateToVault(
+  candidate: ScanCandidate,
+  overrides?: Partial<ClassificationResult>,
+): Promise<SaveCandidateResult> {
+  const drive = getDriveService();
+  const gmail = getGmailService();
+  const classification = classificationForCandidate(candidate, overrides);
 
   if (!candidate.gmailMessageId || !candidate.gmailAttachmentId) {
     throw new Error('Missing Gmail message/attachment id — cannot download the file');
@@ -288,6 +356,7 @@ export async function saveCandidateToVault(
     driveFolderPath: classification.category,
     version: {
       driveFileId: uploaded.id,
+      storageKind: 'drive_copy',
       fileName: uploaded.name,
       mimeType: candidate.mimeType,
       hash,
@@ -296,6 +365,9 @@ export async function saveCandidateToVault(
       source: 'gmail',
       gmailMessageId: candidate.gmailMessageId,
       gmailAttachmentId: candidate.gmailAttachmentId,
+      gmailFrom: candidate.from,
+      gmailSubject: candidate.subject,
+      gmailDate: candidate.date,
     },
   });
 
@@ -306,7 +378,17 @@ export async function saveCandidateToVault(
     webViewLink: uploaded.webViewLink,
     parentFolderId: folderId,
     category: classification.category,
+    storageKind: 'drive_copy',
   };
+}
+
+export async function approveCandidateByMode(
+  candidate: ScanCandidate,
+  mode: 'gmail_index' | 'drive_copies',
+  overrides?: Partial<ClassificationResult>,
+): Promise<SaveCandidateResult> {
+  if (mode === 'gmail_index') return indexCandidateInVault(candidate, overrides);
+  return saveCandidateToVault(candidate, overrides);
 }
 
 export async function applySyncSuggestion(suggestion: SyncSuggestion): Promise<VaultDocument> {

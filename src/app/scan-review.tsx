@@ -55,6 +55,7 @@ export default function ScanReviewScreen() {
     reviewStats,
     lastSyncedAt,
     vaultFolderUrl,
+    storageMode = 'gmail_index',
   } = vault;
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -145,12 +146,16 @@ export default function ScanReviewScreen() {
         showToast({
           kind: 'approve',
           id: c.id,
-          message: `Saved to your Google Drive › ${ok.folderPath}`,
+          message: ok.message || (storageMode === 'gmail_index' ? 'Saved to your vault' : `Saved to Drive › ${ok.folderPath}`),
           webViewLink: ok.webViewLink,
         });
       }
       if (failed.length && !saved.length) {
-        setError(`Couldn't save to Drive: ${failed[0].reason}`);
+        setError(
+          storageMode === 'gmail_index'
+            ? `Couldn't save to vault: ${failed[0].reason}`
+            : `Couldn't save to Drive: ${failed[0].reason}`,
+        );
       }
     },
     [approveCandidates, selectedKeys],
@@ -181,8 +186,9 @@ export default function ScanReviewScreen() {
             subtitle={`${reviewStats?.toReview ?? 0} to review · ${reviewStats?.approved ?? 0} approved · ${reviewStats?.skipped ?? 0} skipped`}
           />
           <Banner>
-            Approve copies the attachment into your Google Drive › Kadalas folder (by category) and
-            adds it to your vault. Skip ignores it and will not suggest it again.
+            {storageMode === 'gmail_index'
+              ? 'Approve indexes the Gmail attachment in your vault (no Drive upload). Opening it later fetches from Gmail. Skip ignores it and will not suggest it again.'
+              : 'Approve copies the attachment into your Google Drive › Kadalas folder (by category) and adds it to your vault. Skip ignores it and will not suggest it again.'}
           </Banner>
           <DriveSafetyNote
             vaultFolderUrl={vaultFolderUrl}
@@ -240,6 +246,7 @@ export default function ScanReviewScreen() {
                   key={c.id}
                   candidate={c}
                   vaultDocuments={documents}
+                  storageMode={storageMode}
                   busy={busyId === c.id}
                   selectedKey={selectedKeys[c.id] ?? null}
                   onToggleChip={(key) =>
@@ -317,6 +324,7 @@ export default function ScanReviewScreen() {
 const CandidateCard = memo(function CandidateCard({
   candidate: c,
   vaultDocuments,
+  storageMode,
   busy,
   selectedKey,
   onToggleChip,
@@ -326,6 +334,7 @@ const CandidateCard = memo(function CandidateCard({
 }: {
   candidate: ScanCandidate;
   vaultDocuments: VaultDocument[];
+  storageMode: 'gmail_index' | 'drive_copies';
   busy: boolean;
   selectedKey: string | null;
   onToggleChip: (key: string) => void;
@@ -340,7 +349,10 @@ const CandidateCard = memo(function CandidateCard({
   const showCover = isVehicleReviewFamily(c.classification?.category, m.documentType);
   const possibleKeys =
     showCover && c.possibleSubjectKeys?.length ? c.possibleSubjectKeys : undefined;
-  const dest = destinationFolderPath(c.classification?.category);
+  const dest =
+    storageMode === 'gmail_index'
+      ? 'Vault index (Gmail pointer)'
+      : destinationFolderPath(c.classification?.category);
 
   const subjectDisplay =
     m.subjectLabel && !String(m.subjectLabel).includes(':')
@@ -373,7 +385,12 @@ const CandidateCard = memo(function CandidateCard({
         {c.classification?.category ?? 'Unclassified'} · {m.issuer ?? 'Unknown issuer'}
         {showCover ? ` · ${formatCoverageType(m.coverageType)}` : ''}
       </Text>
-      {!done ? <Text style={styles.dest}>Will save to: {dest}</Text> : null}
+      {!done ? (
+        <Text style={styles.dest}>
+          {storageMode === 'gmail_index' ? 'Will index: ' : 'Will save to: '}
+          {dest}
+        </Text>
+      ) : null}
       {subjectDisplay ? <Text style={styles.meta}>Subject: {subjectDisplay}</Text> : null}
       {c.saveError ? (
         <View style={styles.errorBox}>
@@ -405,7 +422,9 @@ const CandidateCard = memo(function CandidateCard({
           <Button title="Skip" variant="ghost" disabled={busy} onPress={onReject} />
         </View>
       ) : approved ? (
-        <Text style={[styles.status, styles.statusApproved]}>Approved · saved to Drive</Text>
+        <Text style={[styles.status, styles.statusApproved]}>
+          {storageMode === 'gmail_index' ? 'Approved · saved to vault' : 'Approved · saved to Drive'}
+        </Text>
       ) : done ? (
         <Text style={styles.status}>{c.status}</Text>
       ) : null}

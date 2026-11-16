@@ -135,6 +135,7 @@ export function createGoogleDriveService(): DriveService {
           lastScanAt: null,
           documents: [],
           updatedAt: new Date().toISOString(),
+          settings: { storageMode: 'gmail_index' },
         };
         return empty;
       }

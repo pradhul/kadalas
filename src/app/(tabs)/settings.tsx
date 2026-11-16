@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +26,7 @@ import {
 } from '../../services/secureStorage';
 import { AiProviderId, AiUsageStats, VaultCategory } from '../../types/document';
 import { categoryLabel } from '../../lib/folders';
+import { openDocumentContent } from '../../lib/documentContent';
 import {
   applyMoves,
   hasOrganizeUndo,
@@ -23,9 +34,19 @@ import {
   ProposedMove,
   undoLastOrganize,
 } from '../../lib/organizeDrive';
+import { getCurrentVersion } from '../../lib/versioning';
 import { useVault } from '../../context/VaultContext';
 import { getDriveService } from '../../services/drive';
+import {
+  formatBytes,
+  listOfflineMeta,
+  offlineStorageBytes,
+  putOfflineBlob,
+  removeOfflineBlob,
+} from '../../services/offlineCache';
 import { loadOrganizeUndo, saveOrganizeUndo } from '../../services/organizePersist';
+import { loadDeviceSettings, saveDeviceSettings } from '../../services/settingsPersist';
+import { StorageMode } from '../../types/settings';
 
 async function openExternal(url: string) {
   if (Platform.OS === 'web') {
@@ -37,7 +58,7 @@ async function openExternal(url: string) {
 
 export default function SettingsScreen() {
   const { session, signOut, isMock } = useAuth();
-  const { documents, index, refresh } = useVault();
+  const { documents, index, refresh, storageMode, setStorageMode } = useVault();
   const { width } = useWindowDimensions();
   const [provider, setProvider] = useState<AiProviderId>('gemini');
   const [apiKey, setApiKey] = useState('');
@@ -50,6 +71,10 @@ export default function SettingsScreen() {
   const [organizeBusy, setOrganizeBusy] = useState(false);
   const [organizeMessage, setOrganizeMessage] = useState<string | null>(null);
   const [canUndoOrganize, setCanUndoOrganize] = useState(false);
+  const [keepOffline, setKeepOffline] = useState(false);
+  const [offlineBytes, setOfflineBytes] = useState(0);
+  const [offlineBusy, setOfflineBusy] = useState(false);
+  const [storageMessage, setStorageMessage] = useState<string | null>(null);
 
   const selected = useMemo(
     () => AI_PROVIDER_OPTIONS.find((o) => o.id === provider) ?? AI_PROVIDER_OPTIONS[0],
@@ -69,15 +94,118 @@ export default function SettingsScreen() {
       const drive = getDriveService();
       const undoLocal = await loadOrganizeUndo();
       setCanUndoOrganize(undoLocal.moves.length > 0 || (await hasOrganizeUndo(drive)));
+      const device = await loadDeviceSettings();
+      setKeepOffline(device.keepDocumentsOnDevice);
+      setOfflineBytes(offlineStorageBytes());
     })();
     return unsub;
   }, []);
+
+  async function applyStorageMode(mode: StorageMode) {
+    setStorageMessage(null);
+    try {
+      await setStorageMode(mode);
+      setStorageMessage(
+        mode === 'gmail_index'
+          ? 'New approvals will index Gmail only (no Drive upload). Existing Drive copies stay.'
+          : 'New approvals will copy files into Google Drive. Existing Drive copies stay.',
+      );
+    } catch (e) {
+      setStorageMessage(e instanceof Error ? e.message : 'Could not save storage mode');
+    }
+  }
+
+  async function toggleKeepOffline(next: boolean) {
+    setKeepOffline(next);
+    await saveDeviceSettings({ keepDocumentsOnDevice: next });
+    setOfflineBusy(true);
+    setStorageMessage(null);
+    try {
+      if (next) {
+        let cached = 0;
+        for (const doc of documents) {
+          const ver = getCurrentVersion(doc);
+          if (!ver) continue;
+          const result = await openDocumentContent(doc, { cacheOffline: true });
+          if (result.ok && result.dataBase64) {
+            await putOfflineBlob({
+              docId: doc.id,
+              versionId: ver.id,
+              fileName: ver.fileName,
+              mimeType: ver.mimeType,
+              sizeBytes: ver.sizeBytes,
+              dataBase64: result.dataBase64,
+            });
+            cached += 1;
+          }
+        }
+        setStorageMessage(
+          cached
+            ? `Kept ${cached} document(s) on this device for offline viewing.`
+            : 'Offline toggle on — documents will cache as you open them.',
+        );
+      } else {
+        for (const meta of listOfflineMeta()) {
+          await removeOfflineBlob(meta.docId, meta.versionId);
+        }
+        setStorageMessage('Cleared local copies on this device only (Gmail/Drive untouched).');
+      }
+      setOfflineBytes(offlineStorageBytes());
+    } catch (e) {
+      setStorageMessage(e instanceof Error ? e.message : 'Offline sync failed');
+    } finally {
+      setOfflineBusy(false);
+    }
+  }
 
   return (
     <Screen>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView contentContainerStyle={[styles.content, compact && styles.contentCompact]}>
           <SectionTitle title="Settings" subtitle="Account, AI providers, and storage mode." />
+
+          <View style={styles.card}>
+            <Text style={styles.label}>Storage</Text>
+            <Text style={styles.meta}>
+              Gmail index (default): Approve saves a tiny pointer to the email attachment — nothing is copied into
+              Drive. Opening a document fetches it live from Gmail. Use this when Drive space is tight.
+            </Text>
+            <Text style={[styles.meta, { marginTop: 6 }]}>
+              Drive copies: Approve uploads a file into your Kadalas folder (previous behavior). Existing Drive files
+              always keep working. Switching modes never deletes anything in Gmail or Drive.
+            </Text>
+            <View style={[styles.row, compact && styles.rowWrap, { marginTop: spacing.sm }]}>
+              <Button
+                title={storageMode === 'gmail_index' ? '✓ Gmail index' : 'Gmail index'}
+                variant={storageMode === 'gmail_index' ? 'primary' : 'secondary'}
+                onPress={() => void applyStorageMode('gmail_index')}
+              />
+              <Button
+                title={storageMode === 'drive_copies' ? '✓ Drive copies' : 'Drive copies'}
+                variant={storageMode === 'drive_copies' ? 'primary' : 'secondary'}
+                onPress={() => void applyStorageMode('drive_copies')}
+              />
+            </View>
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.value}>Keep documents on this device</Text>
+                <Text style={styles.meta}>
+                  Offline viewing via local cache
+                  {Platform.OS === 'web' ? ' (IndexedDB)' : ' (device storage)'}. Clearing this only removes the
+                  device copy.
+                </Text>
+                <Text style={styles.meta}>Storage used: {formatBytes(offlineBytes)}</Text>
+              </View>
+              <Switch
+                value={keepOffline}
+                disabled={offlineBusy}
+                onValueChange={(v) => void toggleKeepOffline(v)}
+                trackColor={{ true: colors.teal, false: colors.line }}
+                testID="keep-offline-toggle"
+              />
+            </View>
+            {storageMessage ? <Banner tone="info">{storageMessage}</Banner> : null}
+          </View>
 
           <View style={styles.card}>
             <Text style={styles.label}>Signed in</Text>
@@ -358,6 +486,15 @@ const styles = StyleSheet.create({
   label: { ...typography.label, color: colors.inkMuted },
   value: { ...typography.h3, color: colors.ink },
   meta: { ...typography.caption, color: colors.inkMuted },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
   section: { ...typography.h3, color: colors.ink, marginBottom: spacing.sm },
   providerList: { gap: spacing.sm, marginBottom: spacing.md },
   provider: {

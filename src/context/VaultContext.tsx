@@ -26,7 +26,7 @@ import { getDriveService } from '../services/drive';
 import {
   addLocalDocument,
   applySyncSuggestion,
-  saveCandidateToVault,
+  approveCandidateByMode,
   syncDocumentFromGmail,
 } from '../services/vaultOps';
 import { clearScanJobState, getScanEngine } from '../services/scanEngine';
@@ -38,6 +38,8 @@ import {
 } from '../lib/approveFlow';
 import { rekeyDemoVehicleSubjects } from '../lib/rekeyDemoSubjects';
 import { getActiveStageLabel } from '../lib/scanPipeline';
+import { DEFAULT_STORAGE_MODE, StorageMode } from '../types/settings';
+import { settingsFromIndex, withVaultSettings } from '../lib/vaultSettings';
 import { useAuth } from './AuthContext';
 import { ScanProgressProvider } from './ScanProgressContext';
 import { useMocks } from '../services/config';
@@ -95,6 +97,9 @@ interface VaultContextValue {
   /** Open this URL to browse the Kadalas folder in Google Drive. */
   vaultFolderUrl: string | null;
   skippedAttachmentIds: string[];
+  /** Approve storage mode (gmail_index default). */
+  storageMode: StorageMode;
+  setStorageMode: (mode: StorageMode) => Promise<void>;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -358,23 +363,40 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     [index, startMailboxScan],
   );
 
+  const storageMode: StorageMode = settingsFromIndex(index).storageMode || DEFAULT_STORAGE_MODE;
+
+  const setStorageMode = useCallback(
+    async (mode: StorageMode) => {
+      const drive = getDriveService();
+      const current = index ?? (await drive.loadIndex());
+      const next = withVaultSettings(current, { storageMode: mode });
+      // Never delete Drive files when switching modes — only change future Approve behavior.
+      await drive.saveIndex(next);
+      setIndex(next);
+      setLastSyncedAt(next.updatedAt);
+    },
+    [index],
+  );
+
   const approveCandidates = useCallback(
     async (
       ids: string[],
       subjectOverrides?: Record<string, string>,
     ): Promise<{ saved: ApproveResult[]; failed: Array<{ candidateId: string; reason: string }> }> => {
+      const mode = settingsFromIndex(index).storageMode;
       const flow = await runApproveFlow({
         ids,
         candidates: lastScanCandidates,
         subjectOverrides,
         applySubjectOverride,
         save: async (candidate) => {
-          const result = await saveCandidateToVault(candidate);
+          const result = await approveCandidateByMode(candidate, mode);
           return {
             category: result.category,
             title: result.document.title,
             driveFileId: result.driveFileId,
             webViewLink: result.webViewLink,
+            storageKind: result.storageKind,
           };
         },
       });
@@ -390,7 +412,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       }
       for (const ok of flow.saved) {
         getScanEngine().logEvent(
-          `Approved ${ok.fileName} → ${ok.folderPath} (${ok.driveFileId})`,
+          ok.storageKind === 'gmail_index'
+            ? `Indexed ${ok.fileName} (Gmail index — no Drive upload)`
+            : `Approved ${ok.fileName} → ${ok.folderPath} (${ok.driveFileId})`,
         );
       }
 
@@ -586,6 +610,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       lastSyncedAt,
       vaultFolderUrl,
       skippedAttachmentIds: reviewState.skippedIds,
+      storageMode,
+      setStorageMode,
     }),
     [
       index,
@@ -616,6 +642,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       lastSyncedAt,
       vaultFolderUrl,
       reviewState.skippedIds,
+      storageMode,
+      setStorageMode,
     ],
   );
 

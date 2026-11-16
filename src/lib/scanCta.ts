@@ -51,7 +51,7 @@ export function buildScanCta(input: {
     return {
       kind: 'review',
       title: `Review ${pending} document${pending === 1 ? '' : 's'}`,
-      subtitle: 'Approve copies into Google Drive · Skip ignores',
+      subtitle: 'Approve into vault · Skip ignores',
       pendingCount: pending,
     };
   }

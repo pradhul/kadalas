@@ -2,6 +2,7 @@ const uploadFile = jest.fn();
 const getFolderIdForCategory = jest.fn();
 const upsertDocument = jest.fn();
 const getAttachment = jest.fn();
+const ensureVaultStructure = jest.fn();
 
 jest.mock('../src/services/config', () => ({
   useMocks: () => true,
@@ -12,6 +13,7 @@ jest.mock('../src/services/drive', () => ({
     getFolderIdForCategory,
     uploadFile,
     upsertDocument,
+    ensureVaultStructure,
   }),
 }));
 
@@ -25,7 +27,7 @@ jest.mock('../src/services/ai', () => ({
   getAiService: () => ({}),
 }));
 
-import { saveCandidateToVault } from '../src/services/vaultOps';
+import { indexCandidateInVault, saveCandidateToVault } from '../src/services/vaultOps';
 import { ScanCandidate } from '../src/types/document';
 
 function candidate(): ScanCandidate {
@@ -73,6 +75,7 @@ describe('saveCandidateToVault', () => {
       webViewLink: 'https://drive.google.com/file/d/file_abc/view',
     });
     upsertDocument.mockImplementation(async (doc: unknown) => doc);
+    ensureVaultStructure.mockResolvedValue({ vaultFolderId: 'vault', folderIdsByPath: {} });
   });
 
   it('uploads into the category folder parent and returns the Drive file id', async () => {
@@ -89,6 +92,18 @@ describe('saveCandidateToVault', () => {
     expect(result.webViewLink).toContain('file_abc');
     expect(result.parentFolderId).toBe('folder_health_id');
     expect(result.category).toBe('Insurance/Health');
+    expect(result.storageKind).toBe('drive_copy');
+  });
+
+  it('indexes gmail-only without uploading to Drive', async () => {
+    const result = await indexCandidateInVault(candidate());
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(getAttachment).not.toHaveBeenCalled();
+    expect(upsertDocument).toHaveBeenCalled();
+    expect(result.driveFileId).toBe('');
+    expect(result.storageKind).toBe('gmail_index');
+    expect(result.document.versions[0].gmailMessageId).toBe('msg1');
+    expect(result.document.versions[0].storageKind).toBe('gmail_index');
   });
 
   it('throws when Gmail attachment download fails (no silent placeholder)', async () => {

@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-11-16
+
+### Added
+
+- **Storage modes** (Settings): default **Gmail index** for new users — Approve writes a tiny vault-index pointer (no Drive upload); opening fetches the attachment live from Gmail with a clear “Original email no longer available” error when mail is gone
+- **Drive copies** mode keeps the previous upload-to-Kadalas behavior; existing Drive files always keep working; switching modes never deletes Gmail or Drive files
+- **Keep documents on this device** offline toggle (IndexedDB on web / expo-file-system on native) with storage-used indicator and per-document available-offline state; clearing cache only removes the device copy
+- Approve confirmation copy matches the mode (“Saved to your vault” vs “Saved to Drive”)
+
+### Changed
+
+- Version bump to **0.1.9**
+
 ## [0.1.8] - 2026-11-16
 
 ### Fixed

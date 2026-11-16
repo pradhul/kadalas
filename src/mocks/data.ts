@@ -10,6 +10,7 @@ export const MOCK_VAULT_INDEX: VaultIndex = {
   vaultFolderId: 'mock_vault_root',
   lastScanAt: days(3),
   updatedAt: days(1),
+  settings: { storageMode: 'gmail_index' },
   documents: [
     // KA-01-AB-1234 — long-term TP (Digit) + annual OD (Progressive); prior comprehensive superseded
     {
