@@ -12,17 +12,31 @@ import {
 import { Link, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DriveSafetyNote } from '../../components/DriveSafetyNote';
+import { ScanCtaCard } from '../../components/ScanCtaCard';
 import { BrandMark, Button, Chip, EmptyState, Screen } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
 import { buildFolderTree } from '../../lib/folders';
 import { buildVehicleCoverViews } from '../../lib/grouping';
+import { getActiveStageLabel } from '../../lib/scanPipeline';
+import { buildScanCta } from '../../lib/scanCta';
 import { VAULT_CATEGORIES, VaultCategory } from '../../types/document';
 
 export default function VaultHomeScreen() {
   const { session, isMock } = useAuth();
-  const { documents, loading, error, refresh, lastSyncedAt, vaultFolderUrl } = useVault();
+  const {
+    documents,
+    loading,
+    error,
+    refresh,
+    lastSyncedAt,
+    vaultFolderUrl,
+    scanJob,
+    lastScanCandidates,
+    scanEngineRunning,
+    resumeMailboxScan,
+  } = useVault();
   const { width } = useWindowDimensions();
   const columns = width >= 900 ? 3 : width >= 600 ? 2 : 1;
   const fade = useRef(new Animated.Value(0)).current;
@@ -39,6 +53,21 @@ export default function VaultHomeScreen() {
   }, [documents]);
 
   const vehicles = useMemo(() => buildVehicleCoverViews(documents), [documents]);
+
+  const scanCta = useMemo(
+    () =>
+      buildScanCta({
+        scanJob,
+        scanEngineRunning,
+        candidates: lastScanCandidates,
+        stageLabel: scanJob
+          ? getActiveStageLabel(scanJob.stage, {
+              authPause: scanJob.quotaPause?.httpStatus === 401,
+            })
+          : undefined,
+      }),
+    [scanJob, scanEngineRunning, lastScanCandidates],
+  );
 
   const topFolders = buildFolderTree().children;
 
@@ -69,6 +98,10 @@ export default function VaultHomeScreen() {
             vaultFolderUrl={vaultFolderUrl}
             lastSyncedAt={lastSyncedAt}
             documentCount={documents.length}
+          />
+          <ScanCtaCard
+            cta={scanCta}
+            onResume={() => void resumeMailboxScan().catch(() => undefined)}
           />
         </Animated.View>
 
@@ -169,11 +202,6 @@ export default function VaultHomeScreen() {
           />
         )}
 
-        {!documents.length ? (
-          <View style={styles.footerCta}>
-            <Button title="Scan Gmail" onPress={() => router.push('/(tabs)/scan')} />
-          </View>
-        ) : null}
       </SafeAreaView>
     </Screen>
   );

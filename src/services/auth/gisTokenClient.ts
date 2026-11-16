@@ -16,13 +16,14 @@ export type GisTokenResponse = {
 };
 
 type TokenClient = {
-  requestAccessToken: (overrideConfig?: { prompt?: string }) => void;
+  requestAccessToken: (overrideConfig?: { prompt?: string; hint?: string }) => void;
 };
 
 type GisOauth2 = {
   initTokenClient: (config: {
     client_id: string;
     scope: string;
+    hint?: string;
     callback: (response: GisTokenResponse) => void;
     error_callback?: (error: { type?: string; message?: string }) => void;
   }) => TokenClient;
@@ -46,6 +47,8 @@ const GSI_SCRIPT = 'https://accounts.google.com/gsi/client';
 const SCOPE_STRING = GOOGLE_SCOPES.join(' ');
 
 let scriptPromise: Promise<void> | null = null;
+/** Dedupe concurrent GIS token requests into one in-flight promise. */
+let inFlightTokenRequest: Promise<{ accessToken: string; expiresIn: number }> | null = null;
 
 export function loadGisScript(): Promise<void> {
   if (typeof window === 'undefined') {
@@ -83,100 +86,120 @@ function getOauth2(): GisOauth2 {
   return oauth2;
 }
 
+export type GisPromptMode = 'consent' | 'select_account' | '';
+
 /**
  * Request an access token via GIS.
- * - interactive: true → may show account/consent popup
- * - interactive: false → prompt: '' (silent); throws AuthExpiredError if UI is required
+ * - interactive + consent: first sign-in (all scopes once)
+ * - interactive + select_account: reconnect when silent fails
+ * - interactive false / prompt '': silent renew (no UI)
  */
 export async function requestGisAccessToken(options: {
   clientId: string;
   interactive: boolean;
+  /** Email hint so renew/reconnect targets the same account */
+  loginHint?: string | null;
+  /** Override prompt; defaults from interactive */
+  prompt?: GisPromptMode;
 }): Promise<{ accessToken: string; expiresIn: number }> {
-  await loadGisScript();
-  const oauth2 = getOauth2();
+  // Dedupe concurrent renewals / reconnects into a single GIS popup/call.
+  if (inFlightTokenRequest) return inFlightTokenRequest;
 
-  const tokenPromise = new Promise<{ accessToken: string; expiresIn: number }>((resolve, reject) => {
-    let settled = false;
-    const settle = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      fn();
-    };
+  const run = (async () => {
+    await loadGisScript();
+    const oauth2 = getOauth2();
+    const prompt: GisPromptMode =
+      options.prompt ?? (options.interactive ? 'consent' : '');
 
-    const client = oauth2.initTokenClient({
-      client_id: options.clientId,
-      scope: SCOPE_STRING,
-      callback: (response) => {
-        settle(() => {
-          if (response.error || !response.access_token) {
-            const detail = response.error_description || response.error || 'token error';
-            if (!options.interactive) {
-              reject(new AuthExpiredError('Session expired — tap to reconnect Google', true));
+    const tokenPromise = new Promise<{ accessToken: string; expiresIn: number }>((resolve, reject) => {
+      let settled = false;
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
+      const client = oauth2.initTokenClient({
+        client_id: options.clientId,
+        scope: SCOPE_STRING,
+        hint: options.loginHint || undefined,
+        callback: (response) => {
+          settle(() => {
+            if (response.error || !response.access_token) {
+              const detail = response.error_description || response.error || 'token error';
+              if (!options.interactive || prompt === '') {
+                reject(new AuthExpiredError('Session expired — tap to reconnect Google', true));
+                return;
+              }
+              reject(new Error(detail));
               return;
             }
-            reject(new Error(detail));
-            return;
-          }
 
-          const granted =
-            typeof oauth2.hasGrantedAllScopes === 'function'
-              ? oauth2.hasGrantedAllScopes(response, ...GIS_REQUIRED_SCOPES)
-              : hasScopesInTokenResponse(response, GIS_REQUIRED_SCOPES);
+            const granted =
+              typeof oauth2.hasGrantedAllScopes === 'function'
+                ? oauth2.hasGrantedAllScopes(response, ...GIS_REQUIRED_SCOPES)
+                : hasScopesInTokenResponse(response, GIS_REQUIRED_SCOPES);
 
-          if (!granted) {
-            reject(
-              new Error(
-                'Google did not grant Gmail and Drive access. Allow both permissions and try again.',
-              ),
-            );
-            return;
-          }
+            if (!granted) {
+              reject(
+                new Error(
+                  'Google did not grant Gmail and Drive access. Allow both permissions and try again.',
+                ),
+              );
+              return;
+            }
 
-          resolve({
-            accessToken: response.access_token,
-            expiresIn: response.expires_in ?? 3600,
+            resolve({
+              accessToken: response.access_token,
+              expiresIn: response.expires_in ?? 3600,
+            });
           });
-        });
-      },
-      error_callback: (error) => {
-        settle(() => {
-          const type = (error?.type || '').toLowerCase();
-          const message = error?.message || type || 'Google sign-in failed';
-          if (!options.interactive || type.includes('popup_closed') || type.includes('popup_failed')) {
-            if (!options.interactive) {
-              reject(new AuthExpiredError('Session expired — tap to reconnect Google', true));
-              return;
+        },
+        error_callback: (error) => {
+          settle(() => {
+            const type = (error?.type || '').toLowerCase();
+            const message = error?.message || type || 'Google sign-in failed';
+            if (!options.interactive || prompt === '' || type.includes('popup_closed') || type.includes('popup_failed')) {
+              if (!options.interactive || prompt === '') {
+                reject(new AuthExpiredError('Session expired — tap to reconnect Google', true));
+                return;
+              }
             }
-          }
-          reject(new Error(message));
+            reject(new Error(message));
+          });
+        },
+      });
+
+      try {
+        client.requestAccessToken({
+          prompt,
+          hint: options.loginHint || undefined,
         });
-      },
+      } catch (e) {
+        settle(() => reject(e instanceof Error ? e : new Error(String(e))));
+      }
     });
 
-    try {
-      client.requestAccessToken({
-        prompt: options.interactive ? 'consent' : '',
-      });
-    } catch (e) {
-      settle(() => reject(e instanceof Error ? e : new Error(String(e))));
+    if (!options.interactive || prompt === '') {
+      try {
+        return await withTimeout(
+          tokenPromise,
+          GIS_SILENT_TIMEOUT_MS,
+          'Silent Google token renew timed out',
+        );
+      } catch (e) {
+        if (e instanceof AuthExpiredError) throw e;
+        throw new AuthExpiredError('Session expired — tap to reconnect Google', true);
+      }
     }
+
+    return tokenPromise;
+  })();
+
+  inFlightTokenRequest = run.finally(() => {
+    inFlightTokenRequest = null;
   });
-
-  // Silent renew can hang forever on some mobile browsers (e.g. Brave) — time out to AuthExpiredError.
-  if (!options.interactive) {
-    try {
-      return await withTimeout(
-        tokenPromise,
-        GIS_SILENT_TIMEOUT_MS,
-        'Silent Google token renew timed out',
-      );
-    } catch (e) {
-      if (e instanceof AuthExpiredError) throw e;
-      throw new AuthExpiredError('Session expired — tap to reconnect Google', true);
-    }
-  }
-
-  return tokenPromise;
+  return inFlightTokenRequest;
 }
 
 /** Fallback when hasGrantedAllScopes is unavailable — inspect the space-delimited scope string. */
@@ -197,7 +220,6 @@ export async function revokeGisToken(accessToken: string): Promise<void> {
     if (oauth2.revoke) {
       await new Promise<void>((resolve) => {
         oauth2.revoke!(accessToken, () => resolve());
-        // Don't hang if revoke never calls back
         setTimeout(() => resolve(), 2000);
       });
     }

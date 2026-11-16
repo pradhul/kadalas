@@ -124,16 +124,20 @@ async function persistAccessToken(
 }
 
 /** Web: Google Identity Services token client (no client_secret). */
-async function signInWeb(): Promise<AuthSession> {
+async function signInWeb(options?: { prompt?: 'consent' | 'select_account' | '' }): Promise<AuthSession> {
   const clientId = pickClientId();
   if (!clientId) {
     throw new Error('Google OAuth client ID is not configured. Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID.');
   }
 
   try {
+    const existing = await getAuthTokens();
     const { accessToken, expiresIn } = await requestGisAccessToken({
       clientId,
       interactive: true,
+      loginHint: existing?.email,
+      // First sign-in: consent once for all scopes. Reconnect: select_account (no re-consent).
+      prompt: options?.prompt ?? (existing?.email ? 'select_account' : 'consent'),
     });
     const profile = await fetchUserInfo(accessToken);
     const stored = await persistAccessToken(accessToken, expiresIn, profile);
@@ -203,6 +207,9 @@ async function signInNative(): Promise<AuthSession> {
   return toSession(stored);
 }
 
+/** Renew when fewer than 5 minutes remain (proactive) or already expired. */
+const RENEW_SKEW_MS = 5 * 60_000;
+
 async function getValidAccessTokenWeb(): Promise<string> {
   const tokens = await getAuthTokens();
   if (!tokens?.accessToken) {
@@ -210,7 +217,7 @@ async function getValidAccessTokenWeb(): Promise<string> {
     throw new AuthExpiredError();
   }
 
-  const stillValid = tokens.expiresAt && tokens.expiresAt > Date.now() + 60_000;
+  const stillValid = tokens.expiresAt && tokens.expiresAt > Date.now() + RENEW_SKEW_MS;
   if (stillValid) return tokens.accessToken;
 
   const clientId = pickClientId();
@@ -223,6 +230,8 @@ async function getValidAccessTokenWeb(): Promise<string> {
     const { accessToken, expiresIn } = await requestGisAccessToken({
       clientId,
       interactive: false,
+      loginHint: tokens.email,
+      prompt: '',
     });
     await persistAccessToken(accessToken, expiresIn);
     return accessToken;
@@ -266,6 +275,22 @@ export function createGoogleAuthService(): AuthService {
     async signIn() {
       if (Platform.OS === 'web') return signInWeb();
       return signInNative();
+    },
+
+    /** Web reconnect: silent renew first, then select_account (same scopes, no second consent if possible). */
+    async reconnect() {
+      if (Platform.OS !== 'web') return this.signIn();
+      try {
+        await getValidAccessTokenWeb();
+        const tokens = await getAuthTokens();
+        if (tokens?.accessToken) {
+          emitAuthEvent('restored');
+          return toSession(tokens);
+        }
+      } catch {
+        // fall through to interactive
+      }
+      return signInWeb({ prompt: 'select_account' });
     },
 
     async signOut() {

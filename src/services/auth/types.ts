@@ -18,4 +18,9 @@ export interface AuthService {
   signOut(): Promise<void>;
   /** Ensure a valid access token, refreshing if needed. */
   getValidAccessToken(): Promise<string>;
+  /**
+   * Reconnect after silent renew failed.
+   * Defaults to signIn when not implemented (mock).
+   */
+  reconnect?(): Promise<AuthSession>;
 }

@@ -13,9 +13,9 @@ function doc(partial: Partial<VaultDocument> & Pick<VaultDocument, 'id' | 'categ
         id: 'v1',
         fileName: `${partial.id}.pdf`,
         mimeType: 'application/pdf',
-        size: 10,
+        sizeBytes: 10,
         driveFileId: `drive-${partial.id}`,
-        contentHash: 'h',
+        hash: 'h',
         createdAt: '2026-01-01T00:00:00Z',
         source: 'gmail',
       },
@@ -112,11 +112,12 @@ describe('organizeDrive', () => {
     expect(drive.moves).toHaveLength(1);
     expect(drive.moves[0].to).toBe('folder-banking');
     expect(applied.index.documents[0].driveFolderPath).toBe('Banking');
-    expect(drive.undo?.moves.length).toBe(1);
+    expect(applied.undo.moves.length).toBe(1);
+    expect((await drive.loadOrganizeUndo())?.moves.length).toBe(1);
 
     const undone = await undoLastOrganize(drive, applied.index);
     expect(undone.restored).toBe(1);
     expect(undone.index.documents[0].driveFolderPath).toBe('Other');
-    expect(drive.undo?.moves.length ?? 0).toBe(0);
+    expect((await drive.loadOrganizeUndo())?.moves.length ?? 0).toBe(0);
   });
 });

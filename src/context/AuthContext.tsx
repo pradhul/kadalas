@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import {
   AuthSession,
   friendlyAuthError,
@@ -11,6 +12,7 @@ import { setForceDemoMode, useMocks } from '../services/config';
 import { resetAiService } from '../services/ai';
 import { resetDriveService } from '../services/drive';
 import { resetGmailService } from '../services/gmail';
+import { getAuthTokens } from '../services/secureStorage';
 
 interface AuthContextValue {
   session: AuthSession | null;
@@ -63,9 +65,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     return subscribeAuthEvents((event) => {
       if (event === 'expired') setNeedsReconnect(true);
-      if (event === 'restored') setNeedsReconnect(false);
+      if (event === 'restored') {
+        setNeedsReconnect(false);
+        void getAuthService()
+          .getSession()
+          .then((s) => {
+            if (s) setSession(s);
+          })
+          .catch(() => undefined);
+      }
     });
   }, []);
+
+  // Proactive silent renew ~5 min before expiry + on focus/visibility.
+  useEffect(() => {
+    if (!session || session.isMock || Platform.OS !== 'web') return;
+
+    const tryRenew = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void getAuthService()
+        .getValidAccessToken()
+        .then(async () => {
+          const tokens = await getAuthTokens();
+          if (tokens?.accessToken) {
+            setSession((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    accessToken: tokens.accessToken,
+                    expiresAt: tokens.expiresAt,
+                  }
+                : prev,
+            );
+            setNeedsReconnect(false);
+          }
+        })
+        .catch(() => {
+          // getValidAccessToken emits 'expired' on hard failure
+        });
+    };
+
+    const interval = setInterval(tryRenew, 60_000);
+    const onFocus = () => tryRenew();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onFocus);
+    }
+    // Kick once shortly after mount if close to expiry
+    const boot = setTimeout(tryRenew, 2_000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(boot);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onFocus);
+      }
+    };
+  }, [session?.user?.email, session?.isMock, session?.expiresAt]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -110,8 +166,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       setForceDemoMode(false);
-      // Keep Drive/Gmail singletons — only refresh the Google token
-      const next = await getAuthService().signIn();
+      // Keep Drive/Gmail singletons — only refresh the Google token (shared for all screens).
+      const auth = getAuthService();
+      const next = auth.reconnect ? await auth.reconnect() : await auth.signIn();
       setSession(next);
       setNeedsReconnect(false);
     } catch (e) {

@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-11-16
+
+### Fixed
+
+- Root `ErrorBoundary` catches render crashes (including scan-review white screens) with a recovery path home
+- Single global Google session banner; silent token renew + reconnect without duplicate prompts
+- Scan progress emits are throttled; engine yields between Gmail batches to reduce UI jank
+- Scan-review loads with a safe empty/loading state and FlatList grouping
+
+### Added
+
+- Home/Scan CTA driven by live scan state (progress / resume / review / scan)
+- India-first category guidance (banks, Form 16/ITR, Aadhaar/PAN, motor OD/TP) for rules + AI prompts
+- **Organize Drive** (Settings): preview folder moves, confirm via addParents/removeParents only, one-shot undo — never deletes Drive files
+- Split `ScanProgressContext` so progress ticks do not re-render the full vault tree
+
+### Changed
+
+- Version bump to **0.1.8**
+
 ## [0.1.7] - 2026-11-16
 
 ### Fixed

@@ -37,7 +37,9 @@ import {
   runApproveFlow,
 } from '../lib/approveFlow';
 import { rekeyDemoVehicleSubjects } from '../lib/rekeyDemoSubjects';
+import { getActiveStageLabel } from '../lib/scanPipeline';
 import { useAuth } from './AuthContext';
+import { ScanProgressProvider } from './ScanProgressContext';
 import { useMocks } from '../services/config';
 
 export type ApproveResult = ApproveSuccess;
@@ -538,6 +540,20 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const reviewStats = useMemo(() => reviewCounts(lastScanCandidates), [lastScanCandidates]);
 
+  const scanProgressSlice = useMemo(
+    () => ({
+      scanJob,
+      scanEngineRunning,
+      progressPercent: Math.min(100, Math.max(0, scanJob?.stats.progressHighWater ?? 0)),
+      stageLabel: scanJob
+        ? getActiveStageLabel(scanJob.stage, {
+            authPause: scanJob.quotaPause?.httpStatus === 401,
+          })
+        : 'idle',
+    }),
+    [scanJob, scanEngineRunning],
+  );
+
   const value = useMemo<VaultContextValue>(
     () => ({
       index,
@@ -603,7 +619,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
+  return (
+    <VaultContext.Provider value={value}>
+      <ScanProgressProvider value={scanProgressSlice}>{children}</ScanProgressProvider>
+    </VaultContext.Provider>
+  );
 }
 
 export function useVault() {
