@@ -8,15 +8,15 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Banner, BrandMark, Button, Chip, EmptyState, Screen } from '../../components/ui';
-import { colors, radii, spacing, typography } from '../../constants/theme';
+import { CategoryChip, CountTile, DocumentRow } from '../../components/design';
+import { Banner, BrandMark, Button, EmptyState, Screen } from '../../components/ui';
+import { colors, layout, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
 import { useVault } from '../../context/VaultContext';
-import { getActiveStageLabel } from '../../lib/scanPipeline';
-import { buildScanCta } from '../../lib/scanCta';
 import {
   buildVaultList,
   groupVaultList,
@@ -26,9 +26,9 @@ import { findExpiringSoon, getCurrentVersion } from '../../lib/versioning';
 import { isAvailableOffline } from '../../services/offlineCache';
 import { VAULT_CATEGORIES, VaultCategory } from '../../types/document';
 
-const ROW_MIN = 64;
-
 export default function VaultHomeScreen() {
+  const { width } = useWindowDimensions();
+  const desktop = width >= layout.desktopBreakpoint;
   const { session, isMock } = useAuth();
   const {
     index,
@@ -38,15 +38,12 @@ export default function VaultHomeScreen() {
     indexSaveError,
     refresh,
     lastSyncedAt,
-    scanJob,
-    lastScanCandidates,
-    scanEngineRunning,
-    resumeMailboxScan,
     reviewStats,
   } = useVault();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<VaultCategory | 'all'>('all');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const offlineIds = useMemo(() => {
     const set = new Set<string>();
@@ -62,7 +59,6 @@ export default function VaultHomeScreen() {
     [index, query, category, offlineIds],
   );
   const groups = useMemo(() => groupVaultList(items), [items]);
-
   const sections = useMemo(
     () =>
       groups.map((g) => ({
@@ -77,21 +73,6 @@ export default function VaultHomeScreen() {
   const pendingReview = reviewStats?.toReview ?? 0;
   const expiring = useMemo(() => findExpiringSoon(documents, 60), [documents]);
 
-  const scanCta = useMemo(
-    () =>
-      buildScanCta({
-        scanJob,
-        scanEngineRunning,
-        candidates: lastScanCandidates,
-        stageLabel: scanJob
-          ? getActiveStageLabel(scanJob.stage, {
-              authPause: scanJob.quotaPause?.httpStatus === 401,
-            })
-          : undefined,
-      }),
-    [scanJob, scanEngineRunning, lastScanCandidates],
-  );
-
   useEffect(() => {
     void refresh();
   }, []);
@@ -100,36 +81,20 @@ export default function VaultHomeScreen() {
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const onScanCta = useCallback(() => {
-    if (scanCta.kind === 'resume') {
-      void resumeMailboxScan().catch(() => undefined);
-      return;
-    }
-    if (scanCta.kind === 'review') {
-      router.push('/scan-review');
-      return;
-    }
-    router.push('/(tabs)/scan');
-  }, [scanCta.kind, resumeMailboxScan]);
-
-  /** Fixed compact chrome — keeps ≥6 dense rows in the first viewport on ~390px phones. */
   const topChrome = (
     <View style={styles.topChrome} testID="home-top-chrome">
-      <View style={styles.headerTop}>
-        <BrandMark />
-        <View style={styles.headerActions}>
-          <Pressable onPress={onScanCta} style={styles.linkBtn} testID="home-scan-link">
-            <Text style={styles.linkBtnText}>{scanCta.title}</Text>
-          </Pressable>
+      {!desktop ? (
+        <View style={styles.headerTop}>
+          <BrandMark />
           <Pressable
             onPress={() => router.push('/add')}
-            style={[styles.iconBtn, styles.iconBtnPrimary]}
+            style={styles.addBtn}
+            testID="home-add"
           >
-            <Text style={[styles.iconBtnText, { color: '#fff' }]}>Add</Text>
+            <Text style={styles.addBtnText}>+ Add</Text>
           </Pressable>
         </View>
-      </View>
-
+      ) : null}
       <Text style={styles.welcome} numberOfLines={1}>
         {session?.user.name ? `${session.user.name}'s documents` : 'My documents'}
         <Text style={styles.metaInline}>
@@ -140,18 +105,25 @@ export default function VaultHomeScreen() {
       </Text>
 
       <View style={styles.dashRow} testID="home-dash-row">
-        <DashChip label="Docs" value={String(documents.length)} onPress={() => setCategory('all')} />
-        <DashChip
-          label="Review"
-          value={String(pendingReview)}
-          tone={pendingReview ? 'amber' : undefined}
-          onPress={() => router.push(pendingReview ? '/scan-review' : '/(tabs)/scan')}
+        <CountTile
+          label="Docs"
+          value={documents.length}
+          onPress={() => setCategory('all')}
+          testID="dash-Docs"
         />
-        <DashChip
+        <CountTile
+          label="To review"
+          value={pendingReview}
+          tone={pendingReview ? 'amber' : undefined}
+          onPress={() => router.push(pendingReview ? '/(tabs)/review' : '/(tabs)/scan')}
+          testID="dash-Review"
+        />
+        <CountTile
           label="Expiring"
-          value={String(expiring.length)}
+          value={expiring.length}
           tone={expiring.length ? 'rose' : undefined}
           onPress={() => router.push('/(tabs)/expiring')}
+          testID="dash-Expiring"
         />
       </View>
 
@@ -159,7 +131,7 @@ export default function VaultHomeScreen() {
         value={query}
         onChangeText={setQuery}
         placeholder="Search your documents"
-        placeholderTextColor={colors.inkMuted}
+        placeholderTextColor={colors.inkTertiary}
         style={styles.search}
         testID="vault-search"
       />
@@ -169,16 +141,16 @@ export default function VaultHomeScreen() {
         contentContainerStyle={styles.chipsScroll}
         testID="home-category-chips"
       >
-        <Chip
+        <CategoryChip
           label="All"
-          tone={category === 'all' ? 'teal' : undefined}
+          selected={category === 'all'}
           onPress={() => setCategory('all')}
         />
         {VAULT_CATEGORIES.map((c) => (
-          <Chip
+          <CategoryChip
             key={c}
             label={c.includes('/') ? c.split('/')[1] : c}
-            tone={category === c ? 'teal' : undefined}
+            selected={category === c}
             onPress={() => setCategory(c)}
           />
         ))}
@@ -190,7 +162,6 @@ export default function VaultHomeScreen() {
           {isMock ? ' · demo vault' : ' · Drive / Gmail'}
         </Text>
       ) : null}
-
       {indexSaveError ? (
         <Banner tone="danger">
           {indexSaveError}
@@ -206,22 +177,23 @@ export default function VaultHomeScreen() {
 
   return (
     <Screen>
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={styles.safe} edges={desktop ? [] : ['top']}>
         {topChrome}
         {loading && !documents.length ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={colors.teal} />
+          <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
         ) : !documents.length ? (
           <EmptyState
             title="No documents yet"
-            body="Scan Gmail and approve what you want to keep."
+            body="Scan Gmail and approve what you want to keep — or email a file to yourself with kadalas in the subject."
           >
             <Button title="Scan Gmail" onPress={() => router.push('/(tabs)/scan')} />
+            <Button title="Add document" variant="secondary" onPress={() => router.push('/add')} />
           </EmptyState>
         ) : (
           <SectionList
             style={styles.listFlex}
             sections={sections}
-            keyExtractor={(item, index) => `${item.id}-${index}`}
+            keyExtractor={(item, i) => `${item.id}-${i}`}
             stickySectionHeadersEnabled
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={
@@ -239,7 +211,28 @@ export default function VaultHomeScreen() {
                 <Text style={styles.sectionChevron}>{collapsed[section.id] ? '▸' : '▾'}</Text>
               </Pressable>
             )}
-            renderItem={({ item }) => <DocumentRow item={item} />}
+            renderItem={({ item }) => (
+              <View style={styles.rowPad}>
+                <DocumentRow
+                  title={item.title}
+                  meta={[
+                    item.sender,
+                    new Date(item.date).toLocaleDateString(),
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  categoryLabel={item.categoryLabel}
+                  storage={item.storageBadges}
+                  expiryDate={item.expiryDate}
+                  selected={selectedId === item.id}
+                  testID={`vault-doc-${item.id}`}
+                  onPress={() => {
+                    setSelectedId(item.id);
+                    router.push(`/document/${item.id}`);
+                  }}
+                />
+              </View>
+            )}
             initialNumToRender={14}
             windowSize={10}
           />
@@ -249,160 +242,62 @@ export default function VaultHomeScreen() {
   );
 }
 
-function DashChip({
-  label,
-  value,
-  onPress,
-  tone,
-}: {
-  label: string;
-  value: string;
-  onPress: () => void;
-  tone?: 'amber' | 'rose';
-}) {
-  return (
-    <Pressable onPress={onPress} style={styles.dashChip} testID={`dash-${label}`}>
-      <Text
-        style={[
-          styles.dashValue,
-          tone === 'amber' && { color: colors.amber },
-          tone === 'rose' && { color: colors.rose },
-        ]}
-      >
-        {value}
-      </Text>
-      <Text style={styles.dashLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function DocumentRow({ item }: { item: VaultListItem }) {
-  return (
-    <Pressable
-      style={styles.row}
-      onPress={() => router.push(`/document/${item.id}`)}
-      testID={`vault-doc-${item.id}`}
-    >
-      <View style={styles.rowBody}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {item.sender ? `${item.sender} · ` : ''}
-          {new Date(item.date).toLocaleDateString()}
-          {item.storageBadges.length ? ` · ${item.storageBadges.join(' · ')}` : ''}
-          {item.expiryDate ? ` · exp ${item.expiryDate}` : ''}
-        </Text>
-      </View>
-      <Text style={styles.chevron}>›</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   listFlex: { flex: 1 },
   topChrome: {
-    paddingHorizontal: spacing.md,
-    paddingTop: 4,
-    paddingBottom: 4,
-    gap: 6,
+    paddingHorizontal: spacing.pageMobile,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
     backgroundColor: colors.paper,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomColor: colors.border,
   },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  linkBtn: { paddingVertical: 4, paddingHorizontal: 4 },
-  linkBtnText: { ...typography.caption, color: colors.teal, fontWeight: '700' },
-  iconBtn: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radii.md,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  addBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  iconBtnPrimary: { backgroundColor: colors.teal, borderColor: colors.teal },
-  iconBtnText: { ...typography.caption, color: colors.ink, fontWeight: '700' },
-  welcome: { ...typography.bodyStrong, color: colors.ink, fontSize: 16 },
+  addBtnText: { ...typography.bodyStrong, color: colors.onPrimary },
+  welcome: { ...typography.h2, color: colors.ink, fontSize: 18 },
   metaInline: { ...typography.caption, color: colors.inkMuted, fontWeight: '400' },
+  dashRow: { flexDirection: 'row', gap: spacing.sm },
+  search: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    ...typography.body,
+    color: colors.ink,
+    backgroundColor: colors.surface,
+  },
+  chipsScroll: { flexDirection: 'row', gap: 6, paddingRight: spacing.md },
+  syncLine: { ...typography.caption, color: colors.inkTertiary },
   error: { ...typography.caption, color: colors.rose },
   retry: {
     ...typography.caption,
     color: colors.rose,
-    fontWeight: '700',
+    fontFamily: 'Inter_600SemiBold',
     textDecorationLine: 'underline',
   },
-  dashRow: { flexDirection: 'row', gap: 6 },
-  dashChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radii.sm,
-    paddingVertical: 5,
-    paddingHorizontal: 4,
-    backgroundColor: colors.paperElevated,
-  },
-  dashValue: { ...typography.bodyStrong, color: colors.ink, fontSize: 13 },
-  dashLabel: { ...typography.caption, color: colors.inkMuted, fontSize: 11 },
-  search: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radii.md,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    ...typography.body,
-    fontSize: 14,
-    color: colors.ink,
-    backgroundColor: colors.paperElevated,
-  },
-  chipsScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingRight: spacing.md,
-  },
-  syncLine: { ...typography.caption, color: colors.inkMuted, fontSize: 11 },
-  listContent: {
-    paddingBottom: 88,
-    flexGrow: 1,
-  },
+  listContent: { paddingBottom: 96, flexGrow: 1 },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: 8,
+    paddingHorizontal: spacing.pageMobile,
+    paddingTop: 10,
     paddingBottom: 4,
     backgroundColor: colors.paper,
   },
-  sectionTitle: { ...typography.bodyStrong, color: colors.ink, fontSize: 13 },
+  sectionTitle: { ...typography.bodyStrong, color: colors.ink },
   sectionChevron: { ...typography.caption, color: colors.inkMuted },
-  row: {
-    minHeight: ROW_MIN,
-    maxHeight: 72,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: spacing.md,
-    marginBottom: 4,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    backgroundColor: colors.paperElevated,
-  },
-  rowBody: { flex: 1, gap: 2, justifyContent: 'center' },
-  rowTitle: { ...typography.bodyStrong, color: colors.ink, fontSize: 14 },
-  rowMeta: { ...typography.caption, color: colors.inkMuted, fontSize: 11 },
-  chevron: { ...typography.h3, color: colors.inkMuted, fontSize: 18 },
+  rowPad: { paddingHorizontal: spacing.pageMobile },
 });

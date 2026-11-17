@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-17
+
+### Added
+
+- **Calm File Cabinet redesign** (Stitch): teal `#0F5E52`, paper `#F7F6F2`, Manrope + Inter, desktop 240px sidebar, mobile tabs with Review badge, shared design components (DocumentRow, CountTile, CategoryChip, badges, ScanStepper, StorageRadioCard, EmailPane, UndoToast)
+- **Manual save — email yourself**: subject/body `kadalas` self-sent attachments auto-approve (high trust, “Added by you”); optional setting to treat any self-sent attachment as a review item; Add screen copy/mailto/Check now
+- **Manual save — upload / photo**: Add document picks PDF/image or camera; always stores in Drive Kadalas/ (Gmail is readonly)
+
+### Changed
+
+- Version bump to **0.2.0**
+
 ## [0.1.12] - 2026-11-16
 
 ### Fixed
@@ -235,6 +247,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.2.0]: https://github.com/pradhul/kadalas/releases/tag/v0.2.0
 [0.1.12]: https://github.com/pradhul/kadalas/releases/tag/v0.1.12
 [0.1.11]: https://github.com/pradhul/kadalas/releases/tag/v0.1.11
 [0.1.10]: https://github.com/pradhul/kadalas/releases/tag/v0.1.10

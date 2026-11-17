@@ -272,6 +272,7 @@ export async function indexCandidateInVault(
       ...classification.metadata,
       subjectKey: classification.metadata.subjectKey,
       subjectLabel: classification.metadata.subjectLabel,
+      ...(candidate.addedByYou ? { addedByYou: '1' } : {}),
     },
     driveFolderPath: classification.category,
     version: {

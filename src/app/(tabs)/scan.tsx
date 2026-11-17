@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScanStepper } from '../../components/design';
 import { Banner, Button, Field, Screen, SectionTitle } from '../../components/ui';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
@@ -9,6 +10,26 @@ import { useVault } from '../../context/VaultContext';
 import { estimateRemaining, getActiveStageLabel, isAuthPause } from '../../lib/scanPipeline';
 import { useMocks } from '../../services/config';
 import { getAuthTokens } from '../../services/secureStorage';
+
+function stageToStepperIndex(stage?: string): number {
+  switch (stage) {
+    case 'search':
+      return 1;
+    case 'filter':
+      return 2;
+    case 'triage':
+    case 'classify':
+      return 3;
+    case 'dedupe':
+    case 'completed':
+      return 4;
+    case 'paused_quota':
+    case 'paused_user':
+      return 3;
+    default:
+      return 0;
+  }
+}
 
 async function copyText(text: string): Promise<void> {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -110,7 +131,12 @@ export default function ScanScreen() {
             subtitle="Staged pipeline: search → rules → cheap AI triage → full classify → entity grouping."
           />
 
-          <Banner>
+          <ScanStepper
+            activeIndex={stageToStepperIndex(scanJob?.stage)}
+            paused={pausedQuota || pausedAuth}
+          />
+
+          <Banner tone={pausedQuota ? 'warn' : 'info'}>
             Full mailbox scan is resumable and pauses on free-tier AI limits. Found documents appear in Review
             incrementally — you can approve while the scan continues.
           </Banner>

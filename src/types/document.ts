@@ -202,6 +202,10 @@ export interface ScanCandidate {
   aiDetail?: AiDetailSummary;
   /** User-corrected category before Approve. */
   categoryOverride?: VaultCategory;
+  /** Self-sent kadalas (or setting) — high trust / “Added by you”. */
+  addedByYou?: boolean;
+  /** Higher = earlier in review queue (self-sent setting uses 100). */
+  reviewPriority?: number;
 }
 
 export interface SyncSuggestion {

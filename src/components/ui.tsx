@@ -19,7 +19,9 @@ export function Screen({ children, style }: { children: React.ReactNode; style?:
 export function BrandMark({ large }: { large?: boolean }) {
   return (
     <View style={styles.brandRow}>
-      <View style={[styles.brandMark, large && styles.brandMarkLarge]} />
+      <View style={[styles.brandMark, large && styles.brandMarkLarge]}>
+        <Text style={styles.brandMarkGlyph}>K</Text>
+      </View>
       <Text style={[styles.brandText, large && styles.brandTextLarge]}>Kadalas</Text>
     </View>
   );
@@ -223,24 +225,32 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   brandMark: {
-    width: 14,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: colors.teal,
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   brandMarkLarge: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+    width: 36,
+    height: 36,
+    borderRadius: radii.md,
+  },
+  brandMarkGlyph: {
+    ...typography.bodyStrong,
+    color: colors.onPrimary,
+    fontSize: 14,
   },
   brandText: {
-    ...typography.h3,
-    color: colors.ink,
+    ...typography.brand,
+    color: colors.primary,
+    fontSize: 18,
   },
   brandTextLarge: {
     ...typography.brand,
-    fontSize: 30,
-    color: colors.ink,
+    fontSize: 28,
+    color: colors.primary,
   },
   btn: {
     minHeight: 48,

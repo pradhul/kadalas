@@ -2,8 +2,16 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
-import { LibreBaskerville_700Bold } from '@expo-google-fonts/libre-baskerville';
+import {
+  useFonts,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
+} from '@expo-google-fonts/manrope';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+} from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { SessionBanner } from '../components/SessionBanner';
@@ -15,11 +23,11 @@ SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    DMSans_400Regular,
-    DMSans_500Medium,
-    DMSans_600SemiBold,
-    DMSans_700Bold,
-    LibreBaskerville_700Bold,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
   });
 
   useEffect(() => {

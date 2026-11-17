@@ -32,6 +32,7 @@ import {
 import { clearScanJobState, getScanEngine } from '../services/scanEngine';
 import { loadReviewState, saveReviewState } from '../services/reviewPersist';
 import { loadIndexMirror, saveIndexMirror } from '../services/indexMirror';
+import { runSelfSentCheck } from '../services/selfSentCheck';
 import {
   ApproveSuccess,
   reclaimFalseApprovals,
@@ -108,6 +109,13 @@ interface VaultContextValue {
   /** Approve storage mode (gmail_index default). */
   storageMode: StorageMode;
   setStorageMode: (mode: StorageMode) => Promise<void>;
+  /** Lightweight self-sent kadalas check (manual save path). */
+  checkSelfSentDocuments: () => Promise<{
+    found: number;
+    autoApproved: number;
+    queuedForReview: number;
+    skippedDuplicate: number;
+  }>;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -699,6 +707,35 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     [refresh],
   );
 
+  const checkSelfSentDocuments = useCallback(async () => {
+    const result = await runSelfSentCheck({
+      userEmail: session?.user.email,
+      vaultDocuments: index?.documents ?? [],
+      autoApprove: async (candidate) => {
+        await approveCandidateByMode(candidate, settingsFromIndex(index).storageMode);
+      },
+      enqueueReview: async (incoming) => {
+        const merged = [...incoming, ...candidatesRef.current];
+        // Prefer higher reviewPriority first
+        merged.sort((a, b) => (b.reviewPriority || 0) - (a.reviewPriority || 0));
+        candidatesRef.current = merged;
+        setLastScanCandidates(merged);
+        await persistReview(
+          { candidates: merged, skippedIds: reviewRef.current.skippedIds },
+          { flush: true },
+        );
+      },
+    });
+    if (result.autoApproved) await refresh();
+    return result;
+  }, [session?.user.email, index, persistReview, refresh]);
+
+  // Lightweight self-sent check when the app opens / vault loads
+  useEffect(() => {
+    if (!session || !index) return;
+    void checkSelfSentDocuments().catch(() => undefined);
+  }, [session?.user.email]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const search = useCallback(
     (query: string) => {
       const q = query.trim().toLowerCase();
@@ -795,6 +832,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       skippedAttachmentIds: reviewState.skippedIds,
       storageMode,
       setStorageMode,
+      checkSelfSentDocuments,
     }),
     [
       index,
@@ -830,6 +868,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       reviewState.skippedIds,
       storageMode,
       setStorageMode,
+      checkSelfSentDocuments,
     ],
   );
 

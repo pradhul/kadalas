@@ -13,6 +13,13 @@ export interface VaultSettings {
 export interface DeviceSettings {
   /** Best-effort local copies for offline viewing (device-only; never touches Gmail/Drive). */
   keepDocumentsOnDevice: boolean;
+  /**
+   * When on, any self-sent email with an attachment (from:me to:me) is surfaced in review
+   * at top priority — even without the kadalas subject tag.
+   */
+  treatSelfSentAttachmentsAsDocuments: boolean;
+  /** ISO time of last self-sent kadalas check (Drive index / local). */
+  lastSelfSentCheckAt?: string | null;
 }
 
 export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
@@ -21,6 +28,8 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 
 export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   keepDocumentsOnDevice: false,
+  treatSelfSentAttachmentsAsDocuments: false,
+  lastSelfSentCheckAt: null,
 };
 
 export function normalizeStorageMode(value: unknown): StorageMode {

@@ -9,7 +9,7 @@ import { getCurrentVersion } from './versioning';
 import { plainDisplayText } from './reviewLabels';
 import { categoryLabel } from './folders';
 
-export type StorageBadge = 'Gmail' | 'Drive' | 'On device';
+export type StorageBadge = 'Gmail' | 'Drive' | 'On device' | 'Added by you';
 
 export type VaultListItem = {
   id: string;
@@ -81,6 +81,7 @@ export function documentStorageBadges(
 ): StorageBadge[] {
   const ver = getCurrentVersion(doc);
   const badges: StorageBadge[] = [];
+  if (doc.metadata.addedByYou === '1') badges.push('Added by you');
   const kind = versionStorageKind(ver);
   if (kind === 'gmail_index' || (ver?.gmailMessageId && !ver.driveFileId)) badges.push('Gmail');
   if (ver?.driveFileId) badges.push('Drive');

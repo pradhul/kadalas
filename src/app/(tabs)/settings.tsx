@@ -45,6 +45,7 @@ import {
   removeOfflineBlob,
 } from '../../services/offlineCache';
 import { loadOrganizeUndo, saveOrganizeUndo } from '../../services/organizePersist';
+import { StorageRadioCard } from '../../components/design';
 import { loadDeviceSettings, saveDeviceSettings } from '../../services/settingsPersist';
 import { StorageMode } from '../../types/settings';
 
@@ -72,6 +73,7 @@ export default function SettingsScreen() {
   const [organizeMessage, setOrganizeMessage] = useState<string | null>(null);
   const [canUndoOrganize, setCanUndoOrganize] = useState(false);
   const [keepOffline, setKeepOffline] = useState(false);
+  const [treatSelfSent, setTreatSelfSent] = useState(false);
   const [offlineBytes, setOfflineBytes] = useState(0);
   const [offlineBusy, setOfflineBusy] = useState(false);
   const [storageMessage, setStorageMessage] = useState<string | null>(null);
@@ -96,6 +98,7 @@ export default function SettingsScreen() {
       setCanUndoOrganize(undoLocal.moves.length > 0 || (await hasOrganizeUndo(drive)));
       const device = await loadDeviceSettings();
       setKeepOffline(device.keepDocumentsOnDevice);
+      setTreatSelfSent(device.treatSelfSentAttachmentsAsDocuments);
       setOfflineBytes(offlineStorageBytes());
     })();
     return unsub;
@@ -117,7 +120,8 @@ export default function SettingsScreen() {
 
   async function toggleKeepOffline(next: boolean) {
     setKeepOffline(next);
-    await saveDeviceSettings({ keepDocumentsOnDevice: next });
+    const prev = await loadDeviceSettings();
+    await saveDeviceSettings({ ...prev, keepDocumentsOnDevice: next });
     setOfflineBusy(true);
     setStorageMessage(null);
     try {
@@ -166,24 +170,20 @@ export default function SettingsScreen() {
 
           <View style={styles.card}>
             <Text style={styles.label}>Storage</Text>
-            <Text style={styles.meta}>
-              Gmail index (default): Approve saves a tiny pointer to the email attachment — nothing is copied into
-              Drive. Opening a document fetches it live from Gmail. Use this when Drive space is tight.
-            </Text>
-            <Text style={[styles.meta, { marginTop: 6 }]}>
-              Drive copies: Approve uploads a file into your Kadalas folder (previous behavior). Existing Drive files
-              always keep working. Switching modes never deletes anything in Gmail or Drive.
-            </Text>
-            <View style={[styles.row, compact && styles.rowWrap, { marginTop: spacing.sm }]}>
-              <Button
-                title={storageMode === 'gmail_index' ? '✓ Gmail index' : 'Gmail index'}
-                variant={storageMode === 'gmail_index' ? 'primary' : 'secondary'}
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              <StorageRadioCard
+                title="Gmail index (default)"
+                body="Approve saves a tiny pointer — nothing copied into Drive. Opening fetches live from Gmail."
+                selected={storageMode === 'gmail_index'}
                 onPress={() => void applyStorageMode('gmail_index')}
+                testID="storage-gmail-index"
               />
-              <Button
-                title={storageMode === 'drive_copies' ? '✓ Drive copies' : 'Drive copies'}
-                variant={storageMode === 'drive_copies' ? 'primary' : 'secondary'}
+              <StorageRadioCard
+                title="Drive copies"
+                body="Approve uploads into Kadalas/. Existing Drive files keep working. Switching never deletes."
+                selected={storageMode === 'drive_copies'}
                 onPress={() => void applyStorageMode('drive_copies')}
+                testID="storage-drive-copies"
               />
             </View>
             <View style={styles.toggleRow}>
@@ -202,6 +202,26 @@ export default function SettingsScreen() {
                 onValueChange={(v) => void toggleKeepOffline(v)}
                 trackColor={{ true: colors.teal, false: colors.line }}
                 testID="keep-offline-toggle"
+              />
+            </View>
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.value}>Treat self-sent attachments as documents</Text>
+                <Text style={styles.meta}>
+                  Any email you send to yourself with an attachment goes to Review (top priority). Default off —
+                  kadalas-tagged subjects still auto-add.
+                </Text>
+              </View>
+              <Switch
+                value={treatSelfSent}
+                onValueChange={(v) => {
+                  setTreatSelfSent(v);
+                  void loadDeviceSettings().then((prev) =>
+                    saveDeviceSettings({ ...prev, treatSelfSentAttachmentsAsDocuments: v }),
+                  );
+                }}
+                trackColor={{ true: colors.teal, false: colors.line }}
+                testID="treat-self-sent-toggle"
               />
             </View>
             {storageMessage ? <Banner tone="info">{storageMessage}</Banner> : null}

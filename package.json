@@ -1,6 +1,6 @@
 {
   "name": "kadalas",
-  "version": "0.1.12",
+  "version": "0.2.0",
   "description": "Kadalas — personal papers vault (Expo): Gmail scan, Google Drive storage, BYOK AI",
   "license": "MIT",
   "author": "Pradhul",
@@ -11,7 +11,9 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/dm-sans": "^0.4.2",
+    "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/libre-baskerville": "^0.4.3",
+    "@expo-google-fonts/manrope": "^0.4.3",
     "@expo/metro-runtime": "~58.0.17",
     "@expo/vector-icons": "^15.0.2",
     "babel-preset-expo": "~58.0.0",

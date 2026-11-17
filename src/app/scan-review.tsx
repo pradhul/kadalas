@@ -297,10 +297,15 @@ export default function ScanReviewScreen() {
         title="Review scan results"
         subtitle={`${localStats.toReview} to review · ${localStats.approved} approved · ${localStats.skipped} skipped`}
       />
+      <View style={styles.explainer} testID="review-explainer">
+        <Text style={styles.explainerText}>
+          Approve = add as Gmail link, nothing copied or deleted · Skip = hide, restore anytime
+        </Text>
+      </View>
       <Banner>
         {storageMode === 'gmail_index'
-          ? 'Approve indexes the Gmail attachment in your vault (no Drive upload). Opening it later fetches from Gmail. Skip ignores it and will not suggest it again.'
-          : 'Approve copies the attachment into your Google Drive › Kadalas folder (by category) and adds it to your vault. Skip ignores it and will not suggest it again.'}
+          ? 'Approve indexes the Gmail attachment in your vault (no Drive upload). Opening it later fetches from Gmail.'
+          : 'Approve copies the attachment into your Google Drive › Kadalas folder (by category).'}
       </Banner>
       <DriveSafetyNote vaultFolderUrl={vaultFolderUrl} lastSyncedAt={lastSyncedAt} compact />
       <TextInput
@@ -737,6 +742,13 @@ const styles = StyleSheet.create({
   listFlex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   header: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: 6 },
+  explainer: {
+    backgroundColor: colors.infoSoft,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  explainerText: { ...typography.caption, color: colors.info },
   back: { ...typography.caption, color: colors.teal, marginBottom: 4 },
   toggleRow: {
     flexDirection: 'row',

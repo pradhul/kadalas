@@ -13,6 +13,10 @@ export async function loadDeviceSettings(): Promise<DeviceSettings> {
       const parsed = JSON.parse(raw) as Partial<DeviceSettings>;
       return {
         keepDocumentsOnDevice: Boolean(parsed.keepDocumentsOnDevice),
+        treatSelfSentAttachmentsAsDocuments: Boolean(
+          parsed.treatSelfSentAttachmentsAsDocuments,
+        ),
+        lastSelfSentCheckAt: parsed.lastSelfSentCheckAt ?? null,
       };
     }
   } catch {

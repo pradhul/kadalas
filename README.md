@@ -1,6 +1,6 @@
 # Kadalas
 
-**v0.1.12 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**.
+**v0.2.0 (pre-release)** — *kadalas* (Malayalam for papers/documents). A self-contained personal document vault built with **Expo (React Native + TypeScript + Expo Router)**. One codebase runs on **iOS, Android, and web**. Calm File Cabinet redesign + email-yourself / upload manual save.
 
 There is **no app-owned backend or database**:
 
