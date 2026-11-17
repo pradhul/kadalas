@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kadalas — Web 02 — Home</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-secondary-fixed": "#38413e",
+            "on-tertiary": "#fff7f4",
+            "inverse-on-surface": "#9d9d9a",
+            "tertiary": "#8c5100",
+            "surface-variant": "#e0e4db",
+            "primary": "#20695d",
+            "secondary": "#58615e",
+            "secondary-fixed-dim": "#cdd6d3",
+            "on-primary-container": "#0b5c50",
+            "on-secondary-container": "#4b5451",
+            "on-surface-variant": "#5c605a",
+            "surface": "#faf9f5",
+            "on-primary": "#ddfff5",
+            "surface-dim": "#d7dcd2",
+            "error": "#9f403d",
+            "on-secondary": "#f2fbf7",
+            "tertiary-fixed": "#f7a44a",
+            "on-background": "#2f342e",
+            "secondary-fixed": "#dbe5e1",
+            "on-surface": "#2f342e",
+            "outline-variant": "#afb3ac",
+            "surface-container-lowest": "#ffffff",
+            "inverse-primary": "#b8ffee",
+            "surface-tint": "#20695d",
+            "background": "#faf9f5",
+            "on-error": "#fff7f6",
+            "tertiary-dim": "#7b4600",
+            "tertiary-container": "#f7a44a",
+            "inverse-surface": "#0d0f0d",
+            "surface-container-low": "#f4f4ef",
+            "primary-fixed": "#aaf0e0",
+            "surface-container-highest": "#e0e4db",
+            "on-primary-fixed": "#00483e",
+            "error-container": "#fe8983",
+            "primary-container": "#aaf0e0",
+            "error-dim": "#4e0309",
+            "primary-fixed-dim": "#9ce2d2",
+            "surface-bright": "#faf9f5",
+            "on-tertiary-container": "#502c00",
+            "secondary-container": "#dbe5e1",
+            "on-error-container": "#752121",
+            "surface-container": "#edeee8",
+            "outline": "#787c75",
+            "on-secondary-fixed-variant": "#545d5a",
+            "secondary-dim": "#4c5552",
+            "surface-container-high": "#e7e9e2",
+            "primary-dim": "#0d5d51",
+            "tertiary-fixed-dim": "#e7973e",
+            "on-primary-fixed-variant": "#1c665a",
+            "on-tertiary-fixed": "#301800",
+            "on-tertiary-fixed-variant": "#5c3400"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": ["Manrope"],
+            "display": ["Manrope"],
+            "body": ["Inter"],
+            "label": ["Inter"]
+          }
+        },
+      },
+    }
+  </script>
+</head>
+<body class="h-full bg-background text-on-background font-body antialiased flex overflow-hidden">
+<!-- Left Sidebar (SideNavBar) -->
+<aside class="flex flex-col justify-between h-screen w-60 p-4 border-r border-outline-variant bg-surface-container-low z-40 shrink-0">
+<div class="flex flex-col gap-6">
+<!-- Logo & v1.2 tag -->
+<div class="flex items-center justify-between px-2 pt-1">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-on-primary font-headline font-bold text-base shadow-sm">K</div>
+<span class="font-headline font-bold text-xl tracking-tight text-primary">Kadalas</span>
+</div>
+<span class="px-2 py-0.5 text-xs font-label font-medium bg-surface-container-high text-secondary rounded-full">v1.2</span>
+</div>
+<!-- Action Buttons -->
+<div class="flex flex-col gap-2">
+<button class="w-full flex items-center justify-center gap-2 py-2 px-3 bg-primary text-on-primary rounded-lg font-label font-medium text-sm shadow-sm hover:bg-primary-dim transition-colors">
+<span class="material-symbols-outlined text-lg">add</span>
+<span>Add document</span>
+</button>
+<button class="w-full flex items-center justify-center gap-2 py-2 px-3 bg-surface border border-outline-variant text-on-surface rounded-lg font-label font-medium text-sm hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-lg">sync</span>
+<span>Scan Gmail</span>
+</button>
+</div>
+<!-- Navigation links -->
+<nav class="flex flex-col gap-1">
+<!-- My documents (active) -->
+<a class="flex items-center justify-between px-3 py-2 rounded-lg bg-primary-container text-on-primary-container font-medium text-sm border-l-4 border-primary" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-lg">folder_open</span>
+<span>My documents</span>
+</div>
+</a>
+<!-- Review Queue -->
+<a class="flex items-center justify-between px-3 py-2 rounded-lg text-secondary-dim hover:text-on-surface hover:bg-surface-container transition-colors font-normal text-sm" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-lg">rate_review</span>
+<span>Review Queue</span>
+</div>
+<span class="px-2 py-0.5 text-xs font-semibold bg-primary-container text-on-primary-container rounded-full">12</span>
+</a>
+<!-- Scan Gmail -->
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-secondary-dim hover:text-on-surface hover:bg-surface-container transition-colors font-normal text-sm" href="#">
+<span class="material-symbols-outlined text-lg">sync</span>
+<span>Scan Gmail</span>
+</a>
+<!-- Expiring Soon -->
+<a class="flex items-center justify-between px-3 py-2 rounded-lg text-secondary-dim hover:text-on-surface hover:bg-surface-container transition-colors font-normal text-sm" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-lg">schedule</span>
+<span>Expiring Soon</span>
+</div>
+<span class="px-2 py-0.5 text-xs font-semibold bg-tertiary-container text-on-tertiary-container rounded-full">3</span>
+</a>
+<!-- Vehicles -->
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-secondary-dim hover:text-on-surface hover:bg-surface-container transition-colors font-normal text-sm" href="#">
+<span class="material-symbols-outlined text-lg">directions_car</span>
+<span>Vehicles</span>
+</a>
+<!-- Settings -->
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-secondary-dim hover:text-on-surface hover:bg-surface-container transition-colors font-normal text-sm" href="#">
+<span class="material-symbols-outlined text-lg">settings</span>
+<span>Settings</span>
+</a>
+</nav>
+</div>
+<!-- Bottom profile -->
+<div class="pt-4 border-t border-outline-variant flex flex-col gap-2">
+<div class="flex items-center gap-3 px-2">
+<div class="w-9 h-9 rounded-full bg-surface-container-high flex items-center justify-center font-headline font-semibold text-secondary text-sm">PM</div>
+<div class="flex flex-col overflow-hidden">
+<span class="font-headline font-semibold text-sm text-on-surface truncate">Pradhul Menon</span>
+<span class="font-body text-xs text-secondary truncate">pradhul.m@gmail.com</span>
+</div>
+</div>
+<div class="px-2 py-1 bg-surface-container rounded-md">
+<span class="font-body text-[11px] text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-xs text-primary">cloud_done</span>
+          Synced 2 min ago · Gmail links
+        </span>
+</div>
+</div>
+</aside>
+<!-- Main list column (flexible middle) -->
+<main class="flex-1 flex flex-col h-screen overflow-y-auto bg-background px-6 py-6 border-r border-outline-variant">
+<!-- Top Header Area -->
+<div class="flex flex-col gap-4 mb-6">
+<div class="flex justify-between items-end">
+<div>
+<h1 class="font-headline font-bold text-2xl text-on-surface">My documents</h1>
+<p class="font-body text-sm text-secondary">48 documents filed</p>
+</div>
+</div>
+<!-- Summary Count Tiles -->
+<div class="grid grid-cols-3 gap-4">
+<!-- Tile 1 -->
+<div class="bg-surface p-4 rounded-xl border border-outline-variant flex flex-col justify-between shadow-sm">
+<span class="font-body text-xs font-medium text-secondary uppercase tracking-wider">Total Filed</span>
+<div class="flex items-baseline gap-2 mt-2">
+<span class="font-headline font-bold text-3xl text-on-surface">48</span>
+<span class="font-body text-xs text-secondary">Docs</span>
+</div>
+</div>
+<!-- Tile 2 -->
+<div class="bg-surface p-4 rounded-xl border border-outline-variant flex flex-col justify-between shadow-sm">
+<div class="flex justify-between items-center">
+<span class="font-body text-xs font-medium text-secondary uppercase tracking-wider">Pending Review</span>
+<a class="font-label text-xs font-medium text-primary hover:underline flex items-center gap-1" href="#">
+              Review now <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+<div class="flex items-baseline gap-2 mt-2">
+<span class="font-headline font-bold text-3xl text-on-surface">12</span>
+<span class="font-body text-xs text-secondary">Items</span>
+</div>
+</div>
+<!-- Tile 3 (Amber tint) -->
+<div class="bg-tertiary-container bg-opacity-20 p-4 rounded-xl border border-tertiary-container flex flex-col justify-between shadow-sm">
+<span class="font-body text-xs font-medium text-tertiary uppercase tracking-wider">Action Required</span>
+<div class="flex items-baseline gap-2 mt-2">
+<span class="font-headline font-bold text-3xl text-tertiary">3</span>
+<span class="font-body text-xs text-tertiary-dim">Expiring soon</span>
+</div>
+</div>
+</div>
+<!-- Search Bar -->
+<div class="relative">
+<span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-secondary">
+<span class="material-symbols-outlined text-xl">search</span>
+</span>
+<input class="w-full pl-10 pr-10 py-2.5 bg-surface-muted border border-outline-variant rounded-lg font-body text-sm text-on-surface placeholder-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Search documents, issuers, numbers…" type="text"/>
+<div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+<kbd class="px-1.5 py-0.5 text-xs font-semibold text-secondary bg-surface border border-outline-variant rounded shadow-inner">/</kbd>
+</div>
+</div>
+<!-- Category Chips -->
+<div class="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+<button class="px-3 py-1.5 rounded-full bg-primary-container text-on-primary-container font-label text-xs font-medium flex items-center gap-1.5 shrink-0 shadow-sm">
+<span>All</span>
+<span class="px-1.5 py-0.2 bg-surface rounded-full text-[10px]">48</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Insurance</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">11</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Vehicle</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">6</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Banking</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">9</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Identity</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">5</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Tax</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">6</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Health</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">4</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Bills</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">5</span>
+</button>
+<button class="px-3 py-1.5 rounded-full bg-surface border border-outline-variant text-secondary hover:text-on-surface hover:bg-surface-muted font-label text-xs font-medium flex items-center gap-1.5 shrink-0">
+<span>Travel</span>
+<span class="px-1.5 py-0.2 bg-surface-muted rounded-full text-[10px]">2</span>
+</button>
+</div>
+</div>
+<!-- RECENT DOCUMENTS SECTION -->
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<h2 class="font-headline font-semibold text-xs tracking-wider text-secondary uppercase">Recent Documents</h2>
+<span class="font-body text-xs text-secondary">Showing all categories</span>
+</div>
+<!-- Dense Rows Container -->
+<div class="flex flex-col gap-2">
+<!-- Row 1 -->
+<div class="flex items-center justify-between p-3 bg-surface rounded-xl border border-outline-variant hover:bg-surface-muted transition-colors cursor-pointer">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shrink-0">
+<span class="material-symbols-outlined text-lg">account_balance</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">HDFC Bank — Savings statement Oct 2026</h3>
+<p class="font-body text-xs text-secondary">HDFC Bank · 28 Oct 2026</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 text-xs font-medium bg-surface-muted text-on-surface rounded-full flex items-center gap-1">
+              ₹1,42,800.50
+            </span>
+<span class="px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-full flex items-center gap-1 border border-blue-200">
+<span class="material-symbols-outlined text-xs">mail</span> Gmail link
+            </span>
+</div>
+</div>
+<!-- Row 2 (SELECTED) -->
+<div class="flex items-center justify-between p-3 bg-primary-container bg-opacity-30 rounded-xl border-2 border-primary hover:bg-opacity-50 transition-colors cursor-pointer relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<div class="flex items-center gap-3 pl-1">
+<div class="w-9 h-9 rounded-lg bg-primary text-on-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-lg">directions_car</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Tata AIG Car Insurance (Own Damage)</h3>
+<p class="font-body text-xs text-secondary">KA-01-AB-1234 · 12 Oct 2026</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 text-xs font-medium bg-amber-100 text-amber-900 rounded-full flex items-center gap-1">
+              Expires in 23 days
+            </span>
+<span class="px-2 py-0.5 text-xs font-medium bg-surface text-secondary rounded-full flex items-center gap-1 border border-outline-variant">
+<span class="material-symbols-outlined text-xs">folder</span> Drive copy
+            </span>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="flex items-center justify-between p-3 bg-surface rounded-xl border border-outline-variant hover:bg-surface-muted transition-colors cursor-pointer">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center text-secondary shrink-0">
+<span class="material-symbols-outlined text-lg">badge</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Aadhaar card</h3>
+<p class="font-body text-xs text-secondary">UIDAI · Verified</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 text-xs font-medium bg-surface-muted text-secondary rounded-full font-mono">
+              XXXX XXXX 4821
+            </span>
+<span class="px-2 py-0.5 text-xs font-medium bg-surface-muted text-secondary rounded-full flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">offline_pin</span> Offline
+            </span>
+</div>
+</div>
+<!-- Row 4 -->
+<div class="flex items-center justify-between p-3 bg-surface rounded-xl border border-outline-variant hover:bg-surface-muted transition-colors cursor-pointer">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shrink-0">
+<span class="material-symbols-outlined text-lg">receipt_long</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Form 16 — FY 2025-26, Infosys</h3>
+<p class="font-body text-xs text-secondary">Infosys Limited · 15 Jun 2026</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 text-xs font-medium bg-surface-muted text-secondary rounded-full">
+              Part A &amp; B
+            </span>
+<span class="px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-full flex items-center gap-1 border border-blue-200">
+<span class="material-symbols-outlined text-xs">mail</span> Gmail link
+            </span>
+</div>
+</div>
+<!-- Row 5 -->
+<div class="flex items-center justify-between p-3 bg-surface rounded-xl border border-outline-variant hover:bg-surface-muted transition-colors cursor-pointer">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-surface-container-high flex items-center justify-center text-secondary shrink-0">
+<span class="material-symbols-outlined text-lg">medical_services</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">Star Health Family Floater policy</h3>
+<p class="font-body text-xs text-secondary">Star Health · 2 Apr 2026</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 text-xs font-medium bg-emerald-50 text-emerald-800 rounded-full">
+              Valid till 1 Apr 2027
+            </span>
+<span class="px-2 py-0.5 text-xs font-medium bg-surface text-secondary rounded-full flex items-center gap-1 border border-outline-variant">
+<span class="material-symbols-outlined text-xs">folder</span> Drive copy
+            </span>
+</div>
+</div>
+<!-- Row 6 -->
+<div class="flex items-center justify-between p-3 bg-surface rounded-xl border border-outline-variant hover:bg-surface-muted transition-colors cursor-pointer">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shrink-0">
+<span class="material-symbols-outlined text-lg">credit_card</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-sm text-on-surface">ICICI Amazon Pay Credit Card statement</h3>
+<p class="font-body text-xs text-secondary">ICICI Bank · 1 Nov 2026</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="px-2.5 py-1 text-xs font-medium bg-surface-muted text-on-surface rounded-full">
+              ₹18,420 due 15 Nov
+            </span>
+<span class="px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-full flex items-center gap-1 border border-blue-200">
+<span class="material-symbols-outlined text-xs">mail</span> Gmail link
+            </span>
+</div>
+</div>
+</div>
+</div>
+<!-- Collapsible Group Headers -->
+<div class="mt-6 flex flex-col gap-3 pb-12">
+<h2 class="font-headline font-semibold text-xs tracking-wider text-secondary uppercase">Document Groups</h2>
+<div class="border border-outline-variant rounded-xl bg-surface overflow-hidden">
+<div class="flex items-center justify-between p-3 bg-surface-muted cursor-pointer">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-secondary">expand_more</span>
+<span class="font-headline font-semibold text-sm text-on-surface">Identity</span>
+</div>
+<span class="text-xs text-secondary font-medium">5 documents</span>
+</div>
+</div>
+<div class="border border-outline-variant rounded-xl bg-surface overflow-hidden">
+<div class="flex items-center justify-between p-3 bg-surface-muted cursor-pointer">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-secondary">expand_more</span>
+<span class="font-headline font-semibold text-sm text-on-surface">Insurance</span>
+</div>
+<span class="text-xs text-secondary font-medium">11 documents</span>
+</div>
+</div>
+<div class="border border-outline-variant rounded-xl bg-surface overflow-hidden">
+<div class="flex items-center justify-between p-3 bg-surface-muted cursor-pointer">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-secondary">expand_more</span>
+<span class="font-headline font-semibold text-sm text-on-surface">Banking</span>
+</div>
+<span class="text-xs text-secondary font-medium">9 documents</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Preview Pane (440px width) -->
+<aside class="w-[440px] h-screen bg-surface flex flex-col justify-between border-l border-outline-variant z-30 shrink-0">
+<!-- Top Inspector Header & Controls -->
+<div class="flex items-center justify-between px-5 py-4 border-b border-outline-variant">
+<span class="font-headline font-semibold text-sm text-on-surface">Document Inspector</span>
+<div class="flex items-center gap-1">
+<button class="p-2 rounded-lg text-secondary hover:text-on-surface hover:bg-surface-muted transition-colors" title="Download">
+<span class="material-symbols-outlined text-lg">download</span>
+</button>
+<button class="p-2 rounded-lg text-secondary hover:text-on-surface hover:bg-surface-muted transition-colors" title="Print">
+<span class="material-symbols-outlined text-lg">print</span>
+</button>
+<button class="p-2 rounded-lg text-secondary hover:text-on-surface hover:bg-surface-muted transition-colors" title="Share">
+<span class="material-symbols-outlined text-lg">share</span>
+</button>
+</div>
+</div>
+<!-- Inspector Body Scrollable Content -->
+<div class="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
+<!-- Document Preview Card (Simulated Doc Header Graphic) -->
+<div class="w-full h-40 rounded-xl bg-surface-muted border border-outline-variant p-4 flex flex-col justify-between relative overflow-hidden">
+<div class="absolute -right-6 -bottom-6 w-32 h-32 rounded-full bg-primary-container opacity-20 pointer-events-none"></div>
+<div class="flex justify-between items-start">
+<div>
+<span class="font-headline font-bold text-xs uppercase tracking-wider text-primary">Tata Aig General Insurance</span>
+<p class="font-body text-[11px] text-secondary">Policy Schedule · Motor Package Policy</p>
+</div>
+<span class="px-2 py-0.5 bg-primary text-on-primary rounded font-mono text-[10px] font-semibold">KA-01-AB-1234</span>
+</div>
+<div class="flex justify-between items-end">
+<div>
+<span class="font-body text-[10px] text-secondary block">Insured Name</span>
+<span class="font-headline font-semibold text-xs text-on-surface">Pradhul Menon</span>
+</div>
+<div class="text-right">
+<span class="font-body text-[10px] text-secondary block">IDV Value</span>
+<span class="font-headline font-semibold text-xs text-on-surface">₹6,80,000</span>
+</div>
+</div>
+</div>
+<!-- Badges & Title -->
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-2">
+<span class="px-2.5 py-0.5 rounded-full bg-primary-container text-on-primary-container font-label text-xs font-medium">Vehicle insurance</span>
+<span class="text-xs text-secondary">Added 12 Oct 2026</span>
+</div>
+<h2 class="font-headline font-bold text-lg text-on-surface">Tata AIG Car Insurance — KA-01-AB-1234 (Own Damage)</h2>
+</div>
+<!-- Amber Banner -->
+<div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-3">
+<span class="material-symbols-outlined text-amber-600 text-lg shrink-0 mt-0.5">warning</span>
+<p class="font-body text-xs leading-relaxed">
+          Expires in 23 days — Renewal notice usually arrives by email from policy@tataaig.com. Kadalas will automatically scan for new quotes.
+        </p>
+</div>
+<!-- Structured Record Card -->
+<div class="bg-surface-muted rounded-xl p-4 border border-outline-variant flex flex-col gap-3">
+<span class="font-headline font-semibold text-xs text-secondary uppercase tracking-wider">Structured Metadata</span>
+<div class="grid grid-cols-2 gap-2 text-xs">
+<div>
+<span class="text-secondary block font-body">Issuer</span>
+<span class="font-medium text-on-surface font-body">Tata General</span>
+</div>
+<div>
+<span class="text-secondary block font-body">Policy Holder</span>
+<span class="font-medium text-on-surface font-body">Pradhul Menon</span>
+</div>
+<div>
+<span class="text-secondary block font-body">Policy Number</span>
+<span class="font-medium text-on-surface font-mono">XXXX-XX-4417</span>
+</div>
+<div>
+<span class="text-secondary block font-body">Vehicle</span>
+<span class="font-medium text-on-surface font-mono">KA-01-AB-1234</span>
+</div>
+</div>
+<div class="pt-2 border-t border-outline-variant flex flex-col gap-1">
+<span class="text-secondary text-[11px] font-body">Validity</span>
+<span class="font-medium text-xs text-on-surface flex items-center justify-between">
+<span>13 Nov 2025 → 12 Nov 2026</span>
+<span class="text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded text-[10px]">23d left</span>
+</span>
+</div>
+</div>
+<!-- Source Gmail message box -->
+<div class="bg-surface border border-outline-variant rounded-xl p-4 flex flex-col gap-2 shadow-sm">
+<div class="flex items-center justify-between">
+<span class="font-headline font-semibold text-xs text-secondary uppercase tracking-wider flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-blue-600">mail</span> Source Email
+          </span>
+<span class="text-[11px] text-secondary font-body">12 Oct 2026</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body text-xs font-semibold text-on-surface">From: policy@tataaig.com</span>
+<span class="font-body text-xs text-secondary">Subject: Your Motor Policy Schedule KA01AB1234</span>
+</div>
+</div>
+</div>
+<!-- Action Buttons & Footer -->
+<div class="p-5 border-t border-outline-variant flex flex-col gap-3 bg-surface">
+<div class="flex flex-col gap-2">
+<button class="w-full py-2.5 px-4 bg-primary text-on-primary rounded-lg font-label font-medium text-sm shadow-sm hover:bg-primary-dim transition-colors flex items-center justify-center gap-2">
+<span>Open document preview</span>
+<span class="material-symbols-outlined text-sm">open_in_new</span>
+</button>
+<div class="grid grid-cols-2 gap-2">
+<button class="py-2 px-3 bg-surface border border-outline-variant text-on-surface rounded-lg font-label font-medium text-xs hover:bg-surface-muted transition-colors flex items-center justify-center gap-1.5">
+<span>View email</span>
+</button>
+<button class="py-2 px-3 bg-surface border border-outline-variant text-on-surface rounded-lg font-label font-medium text-xs hover:bg-surface-muted transition-colors flex items-center justify-center gap-1.5">
+<span>Open in Gmail</span>
+</button>
+</div>
+</div>
+<!-- Client-side cached pointer footer -->
+<div class="text-center pt-1">
+<span class="font-mono text-[11px] text-secondary">Client-side cached pointer · ID KDL-9921-TATA</span>
+</div>
+</div>
+</aside>
+</body></html>

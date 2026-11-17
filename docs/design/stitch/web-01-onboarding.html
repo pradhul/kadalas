@@ -1,0 +1,292 @@
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kadalas — Sign in &amp; Onboarding</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-primary-container": "#0b5c50",
+            "on-tertiary-container": "#502c00",
+            "surface": "#faf9f5",
+            "error-dim": "#4e0309",
+            "on-secondary": "#f2fbf7",
+            "on-tertiary-fixed": "#301800",
+            "tertiary-container": "#f7a44a",
+            "secondary-fixed": "#dbe5e1",
+            "surface-bright": "#faf9f5",
+            "primary-fixed-dim": "#9ce2d2",
+            "outline": "#787c75",
+            "on-tertiary-fixed-variant": "#5c3400",
+            "secondary-dim": "#4c5552",
+            "on-error": "#fff7f6",
+            "on-secondary-container": "#4b5451",
+            "on-secondary-fixed": "#38413e",
+            "surface-dim": "#d7dcd2",
+            "inverse-surface": "#0d0f0d",
+            "surface-container-highest": "#e0e4db",
+            "primary-container": "#aaf0e0",
+            "on-error-container": "#752121",
+            "on-surface": "#2f342e",
+            "surface-container": "#edeee8",
+            "on-secondary-fixed-variant": "#545d5a",
+            "on-surface-variant": "#5c605a",
+            "outline-variant": "#afb3ac",
+            "error-container": "#fe8983",
+            "secondary-fixed-dim": "#cdd6d3",
+            "tertiary-dim": "#7b4600",
+            "primary-dim": "#0d5d51",
+            "on-primary-fixed-variant": "#1c665a",
+            "surface-container-lowest": "#ffffff",
+            "surface-container-high": "#e7e9e2",
+            "on-tertiary": "#fff7f4",
+            "secondary-container": "#dbe5e1",
+            "primary-fixed": "#aaf0e0",
+            "tertiary-fixed-dim": "#e7973e",
+            "on-background": "#2f342e",
+            "surface-container-low": "#f4f4ef",
+            "surface-variant": "#e0e4db",
+            "primary": "#0F5E52",
+            "inverse-primary": "#b8ffee",
+            "surface-tint": "#0F5E52",
+            "background": "#F7F6F2",
+            "on-primary-fixed": "#00483e",
+            "tertiary-fixed": "#f7a44a",
+            "tertiary": "#8c5100",
+            "on-primary": "#ddfff5",
+            "error": "#B3261E",
+            "secondary": "#58615e",
+            "inverse-on-surface": "#9d9d9a"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": ["Manrope", "sans-serif"],
+            "display": ["Manrope", "sans-serif"],
+            "body": ["Inter", "sans-serif"],
+            "label": ["Inter", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+</head>
+<body class="h-full bg-background text-on-background font-body antialiased flex flex-col justify-between selection:bg-primary-container selection:text-on-primary-container">
+<!-- Split Screen Layout -->
+<main class="flex-1 flex flex-col md:flex-row w-full h-full min-h-screen">
+<!-- Left Half: Brand & Trust Panel -->
+<section class="w-full md:w-1/2 flex flex-col justify-between p-8 lg:p-16 bg-surface-container-low border-r border-[#E4E1D8] relative overflow-hidden">
+<!-- Decorative background accent elements -->
+<div class="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-primary-container/20 blur-3xl pointer-events-none"></div>
+<div class="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-primary/5 blur-2xl pointer-events-none"></div>
+<!-- Header: Logo -->
+<div class="flex items-center gap-3 z-10">
+<div class="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary shadow-sm">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">description</span>
+</div>
+<span class="font-headline text-2xl font-bold tracking-tight text-primary">Kadalas</span>
+</div>
+<!-- Center Content: Headline & Trust Bullets -->
+<div class="my-auto py-12 max-w-lg z-10">
+<h1 class="font-headline text-4xl lg:text-5xl font-bold tracking-tight text-on-background leading-tight mb-6">
+          Your important papers, found in your Gmail.
+        </h1>
+<p class="text-secondary text-lg mb-10 font-normal">
+          A calm personal document vault that organizes your life's essential records with absolute privacy and precision.
+        </p>
+<div class="space-y-6">
+<!-- Bullet 1 -->
+<div class="flex items-start gap-4">
+<div class="w-8 h-8 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">shield_lock</span>
+</div>
+<div>
+<h3 class="font-headline text-base font-semibold text-on-background">Stays in your Google account — no Kadalas server</h3>
+<p class="text-sm text-secondary">Your documents never leave your personal storage space.</p>
+</div>
+</div>
+<!-- Bullet 2 -->
+<div class="flex items-start gap-4">
+<div class="w-8 h-8 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">key</span>
+</div>
+<div>
+<h3 class="font-headline text-base font-semibold text-on-background">Your own AI key classifies documents</h3>
+<p class="text-sm text-secondary">Complete control over your intelligence provider and privacy tokens.</p>
+</div>
+</div>
+<!-- Bullet 3 -->
+<div class="flex items-start gap-4">
+<div class="w-8 h-8 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">verified_user</span>
+</div>
+<div>
+<h3 class="font-headline text-base font-semibold text-on-background">You approve every document</h3>
+<p class="text-sm text-secondary">Zero automated archiving without your explicit review and confirmation.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer: Version & Security Badge -->
+<div class="flex items-center justify-between text-xs text-secondary pt-6 border-t border-[#E4E1D8] z-10">
+<span class="font-mono">v1.2 Secure Vault Edition</span>
+<div class="flex items-center gap-1.5 text-primary font-medium">
+<span class="material-symbols-outlined text-sm">lock</span>
+<span>End-to-End Local Privacy</span>
+</div>
+</div>
+</section>
+<!-- Right Half: Onboarding Card & Setup Flow -->
+<section class="w-full md:w-1/2 flex items-center justify-center p-6 md:p-12 lg:p-16 bg-surface">
+<div class="w-full max-w-xl bg-surface-container-lowest border border-[#E4E1D8] rounded-2xl p-8 shadow-sm">
+<!-- Card Header -->
+<div class="mb-8">
+<h2 class="font-headline text-2xl font-bold text-on-background mb-2">Set up your vault</h2>
+<p class="text-secondary text-sm">Complete the steps below to initialize your secure paper cabinet.</p>
+</div>
+<!-- 3-Step Onboarding Stepper -->
+<div class="space-y-6">
+<!-- Step 1: Sign in with Google (Completed State) -->
+<div class="border border-[#E4E1D8] rounded-xl p-5 bg-surface-container-low transition-all">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-[#E3F3EA] text-[#1E7A4C] flex items-center justify-center font-bold text-sm">
+                  1
+                </div>
+<div>
+<span class="text-xs uppercase font-semibold text-secondary tracking-wider block">Step 1</span>
+<h3 class="font-headline text-base font-semibold text-on-background">Sign in with Google</h3>
+</div>
+</div>
+<!-- Green Check Badge -->
+<div class="flex items-center gap-1.5 px-3 py-1 bg-[#E3F3EA] text-[#1E7A4C] rounded-full text-xs font-medium">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span>Connected</span>
+</div>
+</div>
+<!-- Expanded info for Step 1 -->
+<div class="mt-4 pt-3 border-t border-[#E4E1D8] flex items-center justify-between text-sm">
+<div class="flex items-center gap-2 text-on-background font-medium">
+<span class="material-symbols-outlined text-secondary text-base">account_circle</span>
+<span>pradhul.m@gmail.com</span>
+</div>
+<button class="text-xs text-primary hover:underline font-medium" type="button">Switch account</button>
+</div>
+</div>
+<!-- Step 2: Add your AI key (Active Expanded State) -->
+<div class="border-2 border-primary rounded-xl p-5 bg-surface-container-lowest shadow-sm transition-all">
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-sm">
+                  2
+                </div>
+<div>
+<span class="text-xs uppercase font-semibold text-primary tracking-wider block">Step 2</span>
+<h3 class="font-headline text-base font-semibold text-on-background">Add your AI key</h3>
+</div>
+</div>
+<span class="text-xs px-2.5 py-1 bg-primary-container text-on-primary-container rounded-full font-medium">Active</span>
+</div>
+<!-- Form Content -->
+<div class="space-y-4">
+<div>
+<label class="block text-xs font-medium text-secondary mb-1.5">AI Provider</label>
+<div class="relative">
+<select class="w-full bg-surface-muted border border-[#E4E1D8] rounded-lg px-3.5 py-2.5 text-sm text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary">
+<option selected="">Google Gemini (recommended)</option>
+<option>OpenAI GPT-4o</option>
+<option>Anthropic Claude 3.5 Sonnet</option>
+<option>Custom Local LLM</option>
+</select>
+</div>
+</div>
+<div>
+<div class="flex justify-between items-center mb-1.5">
+<label class="block text-xs font-medium text-secondary">API Key</label>
+<a class="text-xs text-primary hover:underline font-medium" href="#">Get a free key</a>
+</div>
+<div class="flex gap-2">
+<div class="relative flex-1">
+<input class="w-full bg-surface-muted border border-[#E4E1D8] rounded-lg px-3.5 py-2.5 text-sm font-mono text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary" type="password" value="AIzaSyA-dummy-key-string-Qx4"/>
+</div>
+<button class="px-4 py-2.5 border border-[#E4E1D8] rounded-lg text-sm font-medium text-on-background bg-surface hover:bg-surface-muted transition-colors" type="button">
+                    Test key
+                  </button>
+</div>
+</div>
+<!-- Green success status -->
+<div class="flex items-center gap-2 p-2.5 bg-[#E3F3EA] text-[#1E7A4C] rounded-lg text-xs font-medium">
+<span class="material-symbols-outlined text-base" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span>Key works · Gemini 2.5 Flash</span>
+</div>
+</div>
+</div>
+<!-- Step 3: Choose storage -->
+<div class="border border-[#E4E1D8] rounded-xl p-5 bg-surface-container-low transition-all">
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-surface-container-high text-secondary flex items-center justify-center font-bold text-sm">
+                  3
+                </div>
+<div>
+<span class="text-xs uppercase font-semibold text-secondary tracking-wider block">Step 3</span>
+<h3 class="font-headline text-base font-semibold text-on-background">Choose storage</h3>
+</div>
+</div>
+</div>
+<!-- Radio Cards -->
+<div class="space-y-3">
+<!-- Selected Radio Card -->
+<label class="flex items-start gap-3 p-3.5 border-2 border-primary rounded-lg bg-surface-container-lowest cursor-pointer transition-all">
+<input checked="" class="mt-1 text-primary focus:ring-primary h-4 w-4" name="storage_option" type="radio"/>
+<div>
+<span class="block text-sm font-semibold text-on-background">Gmail links (recommended)</span>
+<span class="block text-xs text-secondary mt-0.5">Keep a pointer to the attachment in Gmail, nothing copied.</span>
+</div>
+</label>
+<!-- Unselected Radio Card -->
+<label class="flex items-start gap-3 p-3.5 border border-[#E4E1D8] rounded-lg bg-surface-container-low hover:bg-surface-container-lowest cursor-pointer transition-all">
+<input class="mt-1 text-primary focus:ring-primary h-4 w-4" name="storage_option" type="radio"/>
+<div>
+<span class="block text-sm font-semibold text-on-background">Drive copies</span>
+<span class="block text-xs text-secondary mt-0.5">Copy files into a dedicated Kadalas folder in your Google Drive.</span>
+</div>
+</label>
+</div>
+<!-- Checkbox below -->
+<div class="mt-4 pt-3 border-t border-[#E4E1D8]">
+<label class="flex items-center gap-2.5 cursor-pointer">
+<input class="rounded text-primary focus:ring-primary h-4 w-4 border-[#E4E1D8]" type="checkbox"/>
+<span class="text-xs font-medium text-on-background">Also keep offline copies on this device</span>
+</label>
+</div>
+</div>
+</div>
+<!-- Primary CTA Button -->
+<div class="mt-8">
+<button class="w-full py-3.5 px-6 bg-primary hover:bg-[#0B4A41] text-on-primary font-headline font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 group" type="button">
+<span>Continue to scan</span>
+<span class="material-symbols-outlined text-lg group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</button>
+</div>
+<!-- Footer link below card -->
+<div class="mt-6 text-center">
+<a class="text-xs text-secondary hover:text-primary transition-colors inline-flex items-center gap-1 font-medium" href="#">
+<span class="material-symbols-outlined text-sm">play_arrow</span>
+<span>Try with demo data</span>
+</a>
+</div>
+</div>
+</section>
+</main>
+</body></html>
