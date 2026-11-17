@@ -392,7 +392,7 @@ export default function ScanScreen() {
                   : ''}
               </Text>
               <Text style={styles.meta}>
-                Approvals save to Google Drive immediately. Skips and the review queue restore after
+                Approvals update your vault index immediately. Skips and the review queue restore after
                 you close the app.
               </Text>
             </View>

@@ -88,7 +88,7 @@ For every deploy host:
 2. **Authorized JavaScript origins** → add `https://your-deployed-host` (and local `http://localhost:43123`)
 3. Redirect URIs are not used by the GIS token client; native iOS/Android will still use authorization-code + PKCE with the `kadalas://` scheme when those clients ship
 
-When the build is in real mode (`EXPO_PUBLIC_USE_MOCKS=false`), the sign-in screen also offers **Try demo data** so you can explore the seeded vault without connecting Google.
+Production builds (`EXPO_PUBLIC_USE_MOCKS=false`) only offer **Sign in with Google** — demo entry and leftover local demo vaults are cleared on load. Mock/demo data is for local/dev (`EXPO_PUBLIC_USE_MOCKS=true`) only.
 
 ---
 

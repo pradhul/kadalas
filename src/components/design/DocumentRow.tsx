@@ -1,6 +1,8 @@
 import React, { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, layout, radii, spacing, typography } from '../../constants/theme';
+import { categoryIconName } from '../../lib/categoryIcons';
 import { ExpiryBadge, StorageBadge } from './badges';
 
 export type DocumentRowProps = {
@@ -39,7 +41,7 @@ export const DocumentRow = memo(function DocumentRow({
     ? 'Insurance'
     : categoryLabel || 'Other';
   const tint = CATEGORY_TINT[tintKey] || colors.primaryContainer;
-  const initial = (categoryLabel || title || '?').charAt(0).toUpperCase();
+  const icon = categoryIconName(categoryLabel);
 
   return (
     <Pressable
@@ -53,7 +55,7 @@ export const DocumentRow = memo(function DocumentRow({
     >
       {selected ? <View style={styles.selectedBar} /> : null}
       <View style={[styles.icon, { backgroundColor: tint }]}>
-        <Text style={styles.iconText}>{initial}</Text>
+        <Ionicons name={icon} size={18} color={colors.onPrimaryContainer} />
       </View>
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={1}>
@@ -105,7 +107,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconText: { ...typography.bodyStrong, color: colors.onPrimaryContainer },
   body: { flex: 1, gap: 2 },
   title: { ...typography.h3, fontSize: 15, color: colors.ink },
   meta: { ...typography.caption, color: colors.inkMuted },

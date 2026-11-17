@@ -1,12 +1,13 @@
 import React from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radii, spacing, typography } from '../constants/theme';
+import { vaultSafetyLine } from '../lib/storageCopy';
+import { StorageMode } from '../types/settings';
 
 function formatSyncedAt(iso: string | null | undefined): string {
   if (!iso) return 'Not synced yet';
   try {
-    const d = new Date(iso);
-    return `Last synced ${d.toLocaleString()}`;
+    return `Last synced ${new Date(iso).toLocaleString()}`;
   } catch {
     return 'Last synced recently';
   }
@@ -17,17 +18,17 @@ export function DriveSafetyNote({
   lastSyncedAt,
   compact,
   documentCount,
+  storageMode = 'gmail_index',
 }: {
   vaultFolderUrl: string | null;
   lastSyncedAt: string | null;
   compact?: boolean;
   documentCount?: number;
+  storageMode?: StorageMode;
 }) {
   return (
     <View style={[styles.box, compact && styles.boxCompact]} testID="drive-safety-note">
-      <Text style={styles.text}>
-        Everything you approve is saved in your Google Drive (Kadalas folder). Closing the app is safe.
-      </Text>
+      <Text style={styles.text}>{vaultSafetyLine(storageMode)}</Text>
       {typeof documentCount === 'number' ? (
         <Text style={styles.meta} testID="vault-index-doc-count">
           {documentCount} document{documentCount === 1 ? '' : 's'} in your vault
@@ -40,10 +41,14 @@ export function DriveSafetyNote({
           accessibilityRole="link"
           testID="open-drive-folder"
         >
-          <Text style={styles.link}>Open Kadalas folder in Drive →</Text>
+          <Text style={styles.link}>
+            {storageMode === 'gmail_index'
+              ? 'Open vault index folder in Drive →'
+              : 'Open Kadalas folder in Drive →'}
+          </Text>
         </Pressable>
       ) : (
-        <Text style={styles.meta}>Demo mode keeps files in this browser only.</Text>
+        <Text style={styles.meta}>Demo mode keeps the vault index in this browser only.</Text>
       )}
     </View>
   );
@@ -52,29 +57,19 @@ export function DriveSafetyNote({
 const styles = StyleSheet.create({
   box: {
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.border,
     borderRadius: radii.md,
-    backgroundColor: colors.tealSoft,
-    padding: spacing.md,
+    backgroundColor: colors.primaryContainer,
+    padding: spacing.lg,
     gap: 4,
   },
-  boxCompact: {
-    padding: spacing.sm,
-  },
-  text: {
-    ...typography.caption,
-    color: colors.ink,
-    lineHeight: 18,
-  },
-  meta: {
-    ...typography.caption,
-    color: colors.inkMuted,
-    fontSize: 12,
-  },
+  boxCompact: { padding: spacing.sm },
+  text: { ...typography.caption, color: colors.ink, lineHeight: 18 },
+  meta: { ...typography.caption, color: colors.inkMuted, fontSize: 12 },
   link: {
     ...typography.caption,
-    color: colors.teal,
-    fontWeight: '600',
+    color: colors.primary,
+    fontFamily: 'Inter_600SemiBold',
     marginTop: 2,
   },
 });

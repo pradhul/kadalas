@@ -1,1 +1,1 @@
-export { default } from '../scan-review';
+export { default } from '../../screens/ReviewScreen';

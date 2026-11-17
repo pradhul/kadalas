@@ -8,11 +8,17 @@ import {
   subscribeAuthEvents,
 } from '../services/auth';
 import { createMockAuthService } from '../services/auth/mockAuth';
-import { setForceDemoMode, useMocks } from '../services/config';
+import {
+  isDemoEntryAllowed,
+  purgeStaleDemoLocalState,
+  setForceDemoMode,
+  useMocks,
+} from '../services/config';
 import { resetAiService } from '../services/ai';
 import { resetDriveService } from '../services/drive';
 import { resetGmailService } from '../services/gmail';
-import { getAuthTokens } from '../services/secureStorage';
+import { clearAuthTokens, getAuthTokens } from '../services/secureStorage';
+import { clearIndexMirror } from '../services/indexMirror';
 
 interface AuthContextValue {
   session: AuthSession | null;
@@ -49,8 +55,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // Production: wipe leftover "Try demo data" flag + local mock vault/tokens
+        // so Chase/Allstate never appear on a real build.
+        if (!isDemoEntryAllowed()) {
+          purgeStaleDemoLocalState();
+          resetServiceSingletons();
+          await clearIndexMirror();
+        }
+
         const existing = await getAuthService().getSession();
-        if (!cancelled) setSession(existing);
+        if (cancelled) return;
+
+        // Reject mock sessions in production builds
+        if (existing?.isMock && !isDemoEntryAllowed()) {
+          await clearAuthTokens();
+          setForceDemoMode(false);
+          resetServiceSingletons();
+          setSession(null);
+        } else if (
+          existing?.accessToken?.startsWith('mock_') &&
+          !isDemoEntryAllowed()
+        ) {
+          await clearAuthTokens();
+          setForceDemoMode(false);
+          resetServiceSingletons();
+          setSession(null);
+        } else {
+          setSession(existing);
+        }
       } catch (e) {
         if (!cancelled) setError(friendlyAuthError(e));
       } finally {
@@ -143,6 +175,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signInWithDemo = useCallback(async () => {
+    if (!isDemoEntryAllowed()) {
+      throw new Error('Demo mode is not available in this build');
+    }
     setError(null);
     setLoading(true);
     try {

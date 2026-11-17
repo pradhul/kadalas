@@ -89,12 +89,21 @@ export const DesktopSidebar = memo(function DesktopSidebar() {
       </View>
 
       <View style={styles.account}>
-        <Text style={styles.accountName} numberOfLines={1}>
-          {session?.user.name || 'Signed in'}
-        </Text>
-        <Text style={styles.accountEmail} numberOfLines={1}>
-          {session?.user.email || ''}
-        </Text>
+        {session ? (
+          <>
+            <Text style={styles.accountName} numberOfLines={1}>
+              {session.user.name || session.user.email}
+            </Text>
+            <Text style={styles.accountEmail} numberOfLines={1}>
+              {session.user.email || ''}
+            </Text>
+          </>
+        ) : (
+          <Pressable onPress={() => router.push('/sign-in')} testID="sidebar-sign-in">
+            <Text style={styles.accountName}>Sign in</Text>
+            <Text style={styles.accountEmail}>Connect Google to open your vault</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );

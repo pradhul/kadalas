@@ -11,6 +11,7 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
+import { RequireAuth } from '../components/RequireAuth';
 import { Banner, Button, Field, Screen } from '../components/ui';
 import { colors, radii, spacing, typography } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
@@ -21,9 +22,17 @@ import { getAiService } from '../services/ai';
 import { ClassificationResult, VAULT_CATEGORIES } from '../types/document';
 
 export default function AddDocumentScreen() {
+  return (
+    <RequireAuth>
+      <AddDocumentBody />
+    </RequireAuth>
+  );
+}
+
+function AddDocumentBody() {
   const { session } = useAuth();
   const { addDocument, storageMode, checkSelfSentDocuments } = useVault();
-  const ownEmail = session?.user.email || 'you@example.com';
+  const ownEmail = session?.user.email || '';
   const [fileName, setFileName] = useState('');
   const [mimeType, setMimeType] = useState('application/pdf');
   const [contentBase64, setContentBase64] = useState('');

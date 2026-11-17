@@ -104,6 +104,18 @@ export default function VaultHomeScreen() {
         </Text>
       </Text>
 
+      {pendingReview > 0 ? (
+        <Pressable
+          style={styles.reviewBanner}
+          onPress={() => router.push('/(tabs)/review')}
+          testID="home-review-banner"
+        >
+          <Text style={styles.reviewBannerText}>
+            {pendingReview} new document{pendingReview === 1 ? '' : 's'} found in Gmail — Review now
+          </Text>
+        </Pressable>
+      ) : null}
+
       <View style={styles.dashRow} testID="home-dash-row">
         <CountTile
           label="Docs"
@@ -175,68 +187,108 @@ export default function VaultHomeScreen() {
     </View>
   );
 
+  const selectedDoc = documents.find((d) => d.id === selectedId) || null;
+
   return (
     <Screen>
       <SafeAreaView style={styles.safe} edges={desktop ? [] : ['top']}>
-        {topChrome}
-        {loading && !documents.length ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
-        ) : !documents.length ? (
-          <EmptyState
-            title="No documents yet"
-            body="Scan Gmail and approve what you want to keep — or email a file to yourself with kadalas in the subject."
-          >
-            <Button title="Scan Gmail" onPress={() => router.push('/(tabs)/scan')} />
-            <Button title="Add document" variant="secondary" onPress={() => router.push('/add')} />
-          </EmptyState>
-        ) : (
-          <SectionList
-            style={styles.listFlex}
-            sections={sections}
-            keyExtractor={(item, i) => `${item.id}-${i}`}
-            stickySectionHeadersEnabled
-            contentContainerStyle={styles.listContent}
-            ListEmptyComponent={
-              <EmptyState title="No matches" body="Try another search or category filter." />
-            }
-            renderSectionHeader={({ section }) => (
-              <Pressable
-                style={styles.sectionHeader}
-                onPress={() => toggleSection(section.id)}
-                testID={`vault-group-${section.id}`}
+        <View style={[styles.shell, desktop && styles.shellDesktop]}>
+          <View style={styles.listCol}>
+            {topChrome}
+            {loading && !documents.length ? (
+              <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+            ) : !documents.length ? (
+              <EmptyState
+                title="No documents yet"
+                body="Scan Gmail and approve what you want to keep — or email a file to yourself with kadalas in the subject."
               >
-                <Text style={styles.sectionTitle}>
-                  {section.title} · {section.count}
-                </Text>
-                <Text style={styles.sectionChevron}>{collapsed[section.id] ? '▸' : '▾'}</Text>
-              </Pressable>
+                <Button title="Scan Gmail" onPress={() => router.push('/(tabs)/scan')} />
+                <Button title="Add document" variant="secondary" onPress={() => router.push('/add')} />
+              </EmptyState>
+            ) : (
+              <SectionList
+                style={styles.listFlex}
+                sections={sections}
+                keyExtractor={(item, i) => `${item.id}-${i}`}
+                stickySectionHeadersEnabled
+                contentContainerStyle={styles.listContent}
+                ListEmptyComponent={
+                  <EmptyState title="No matches" body="Try another search or category filter." />
+                }
+                renderSectionHeader={({ section }) => (
+                  <Pressable
+                    style={styles.sectionHeader}
+                    onPress={() => toggleSection(section.id)}
+                    testID={`vault-group-${section.id}`}
+                  >
+                    <Text style={styles.sectionTitle}>
+                      {section.title} · {section.count}
+                    </Text>
+                    <Text style={styles.sectionChevron}>{collapsed[section.id] ? '▸' : '▾'}</Text>
+                  </Pressable>
+                )}
+                renderItem={({ item }) => (
+                  <View style={styles.rowPad}>
+                    <DocumentRow
+                      title={item.title}
+                      meta={[
+                        item.sender,
+                        new Date(item.date).toLocaleDateString(),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                      categoryLabel={item.categoryLabel}
+                      storage={item.storageBadges}
+                      expiryDate={item.expiryDate}
+                      selected={selectedId === item.id}
+                      testID={`vault-doc-${item.id}`}
+                      onPress={() => {
+                        setSelectedId(item.id);
+                        if (!desktop) router.push(`/document/${item.id}`);
+                      }}
+                    />
+                  </View>
+                )}
+                initialNumToRender={14}
+                windowSize={10}
+              />
             )}
-            renderItem={({ item }) => (
-              <View style={styles.rowPad}>
-                <DocumentRow
-                  title={item.title}
-                  meta={[
-                    item.sender,
-                    new Date(item.date).toLocaleDateString(),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  categoryLabel={item.categoryLabel}
-                  storage={item.storageBadges}
-                  expiryDate={item.expiryDate}
-                  selected={selectedId === item.id}
-                  testID={`vault-doc-${item.id}`}
-                  onPress={() => {
-                    setSelectedId(item.id);
-                    router.push(`/document/${item.id}`);
-                  }}
-                />
-              </View>
-            )}
-            initialNumToRender={14}
-            windowSize={10}
-          />
-        )}
+          </View>
+
+          {desktop ? (
+            <View style={styles.detailPane} testID="home-detail-pane">
+              {selectedDoc ? (
+                <View style={styles.detailInner}>
+                  <Text style={styles.detailOverline}>Document inspector</Text>
+                  <Text style={styles.detailTitle}>{selectedDoc.title}</Text>
+                  <Text style={styles.detailMeta}>
+                    {selectedDoc.category}
+                    {selectedDoc.metadata.issuer ? ` · ${selectedDoc.metadata.issuer}` : ''}
+                  </Text>
+                  {selectedDoc.metadata.expiryDate ? (
+                    <Text style={styles.detailMeta}>Expires {selectedDoc.metadata.expiryDate}</Text>
+                  ) : null}
+                  {selectedDoc.metadata.referenceNumber ? (
+                    <Text style={styles.detailMeta}>Ref {selectedDoc.metadata.referenceNumber}</Text>
+                  ) : null}
+                  <Button
+                    title="Open document"
+                    onPress={() => router.push(`/document/${selectedDoc.id}`)}
+                  />
+                  <Button
+                    title="View full detail"
+                    variant="secondary"
+                    onPress={() => router.push(`/document/${selectedDoc.id}`)}
+                  />
+                </View>
+              ) : (
+                <View style={styles.detailEmpty}>
+                  <Text style={styles.detailMeta}>Select a document to preview</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
+        </View>
       </SafeAreaView>
     </Screen>
   );
@@ -244,7 +296,29 @@ export default function VaultHomeScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  shell: { flex: 1 },
+  shellDesktop: { flexDirection: 'row' },
+  listCol: { flex: 1, minWidth: 0 },
   listFlex: { flex: 1 },
+  detailPane: {
+    width: layout.detailPaneMin,
+    maxWidth: layout.detailPaneMax,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  detailInner: { padding: spacing.lg, gap: spacing.sm },
+  detailEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  detailOverline: { ...typography.overline, color: colors.inkMuted },
+  detailTitle: { ...typography.h2, color: colors.ink },
+  detailMeta: { ...typography.caption, color: colors.inkMuted },
+  reviewBanner: {
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  reviewBannerText: { ...typography.bodyStrong, color: colors.onPrimaryContainer },
   topChrome: {
     paddingHorizontal: spacing.pageMobile,
     paddingTop: spacing.sm,

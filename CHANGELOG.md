@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-17
+
+### Fixed
+
+- **Production demo leak**: leftover `kadalas_force_demo` / mock tokens / mock Drive / index mirror no longer load Chase/Allstate on real builds (`EXPO_PUBLIC_USE_MOCKS=false`). Purge on boot; remove **Try demo data** from production sign-in.
+- Signed-out routes redirect to onboarding with **Sign in with Google**; tabs wrapped in `RequireAuth`.
+- Review screen lives in the tab shell (sidebar + source email pane); storage-mode copy no longer claims Drive saves in Gmail-index mode.
+
+### Changed
+
+- Version bump to **0.2.1**; `app.json` `extra.useMocks` default **false**.
+
 ## [0.2.0] - 2026-11-17
 
 ### Added
@@ -247,6 +259,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.2.1]: https://github.com/pradhul/kadalas/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pradhul/kadalas/releases/tag/v0.2.0
 [0.1.12]: https://github.com/pradhul/kadalas/releases/tag/v0.1.12
 [0.1.11]: https://github.com/pradhul/kadalas/releases/tag/v0.1.11

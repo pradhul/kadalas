@@ -5,7 +5,7 @@ import { LinearGradientFallback } from '../components/GradientBg';
 import { Banner, BrandMark, Button, Screen } from '../components/ui';
 import { colors, spacing, typography } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
-import { useMocks } from '../services/config';
+import { isDemoEntryAllowed, useMocks } from '../services/config';
 
 export default function SignInScreen() {
   const { session, signIn, signInWithDemo, loading, error } = useAuth();
@@ -25,6 +25,7 @@ export default function SignInScreen() {
   const desktop = width >= 900;
   const narrow = width < 420;
   const mocksOn = useMocks();
+  const demoAllowed = isDemoEntryAllowed();
 
   return (
     <Screen>
@@ -57,7 +58,7 @@ export default function SignInScreen() {
 
           <View style={styles.actions}>
             <Button
-              title={mocksOn ? 'Continue with mock Google' : 'Continue with Google'}
+              title={mocksOn ? 'Continue with mock Google' : 'Sign in with Google'}
               loading={loading}
               onPress={async () => {
                 try {
@@ -68,7 +69,7 @@ export default function SignInScreen() {
                 }
               }}
             />
-            {!mocksOn ? (
+            {demoAllowed && !mocksOn ? (
               <Button
                 title="Try demo data"
                 variant="secondary"
@@ -87,8 +88,8 @@ export default function SignInScreen() {
 
           <Text style={styles.scopes}>
             Requests gmail.readonly + drive.file. Drive access is limited to files this app creates.
-            {!mocksOn
-              ? ' Use “Try demo data” to explore seeded vault content without connecting Google.'
+            {demoAllowed && !mocksOn
+              ? ' Dev builds can also try seeded demo data without connecting Google.'
               : ''}
           </Text>
         </Animated.View>
@@ -101,12 +102,12 @@ const styles = StyleSheet.create({
   wrap: {
     flex: 1,
     justifyContent: 'flex-end',
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
+    padding: spacing.xl,
+    paddingBottom: spacing.huge,
   },
   wrapNarrow: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   wrapDesktop: {
     justifyContent: 'center',
@@ -115,36 +116,31 @@ const styles = StyleSheet.create({
     maxWidth: 720,
   },
   hero: {
-    gap: spacing.md,
+    gap: spacing.lg,
     maxWidth: 520,
     width: '100%',
   },
   heroNarrow: {
-    maxWidth: '100%',
+    gap: spacing.md,
   },
   headline: {
-    ...typography.brand,
+    ...typography.display,
     color: colors.ink,
-    marginTop: spacing.sm,
   },
   headlineNarrow: {
-    fontSize: 34,
-    lineHeight: 40,
+    fontSize: 28,
+    lineHeight: 36,
   },
   sub: {
-    ...typography.body,
+    ...typography.bodyLg,
     color: colors.inkMuted,
-    maxWidth: 420,
   },
   actions: {
-    marginTop: spacing.sm,
-    maxWidth: 360,
-    width: '100%',
     gap: spacing.sm,
+    marginTop: spacing.sm,
   },
   scopes: {
     ...typography.caption,
-    color: colors.inkMuted,
-    marginTop: spacing.sm,
+    color: colors.inkTertiary,
   },
 });

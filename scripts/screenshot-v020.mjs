@@ -21,7 +21,7 @@ async function signIn(page) {
 }
 
 async function shot(page, name) {
-  const path = `${OUT}/v0.2.0-${name}.png`;
+  const path = `${OUT}/v0.2.1-${name}.png`;
   await page.screenshot({ path, fullPage: false });
   console.log('wrote', path);
   return path;
@@ -43,8 +43,8 @@ for (const [label, size] of [
   await signIn(page);
   await shot(page, `${label}-01-home`);
 
-  // Review — seed demo list if empty
-  await go(page, '/scan-review');
+  // Review — seed demo list if empty (tab shell)
+  await go(page, '/(tabs)/review');
   const seed = page.getByRole('button', { name: /Load demo review list/i });
   if (await seed.isVisible({ timeout: 2000 }).catch(() => false)) await seed.click();
   await page.waitForTimeout(800);
@@ -67,14 +67,19 @@ for (const [label, size] of [
 
   // Document detail — open first vault doc if present
   await go(page, '/(tabs)');
-  const row = page.locator('[data-testid^="vault-doc-doc_"]').first();
+  const row = page.locator('[data-testid^="vault-doc-"]').first();
   if (await row.isVisible({ timeout: 5000 }).catch(() => false)) {
     await row.click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(800);
+    if (label === 'mobile') {
+      // mobile navigates to detail route
+      await page.waitForTimeout(400);
+    }
     await shot(page, `${label}-08-document-detail`);
   }
 
-  // Sign-in (fresh context)
+  // Sign-in (fresh context) — production-like: no demo button when mocks off;
+  // with mocks on we still capture the onboarding frame after clear.
   await page.evaluate(() => {
     try {
       localStorage.clear();
