@@ -48,10 +48,29 @@ export interface GmailMessageView {
   snippet: string;
 }
 
+export interface GmailMessageHint {
+  messageId: string;
+  threadId?: string;
+  subject: string;
+  from: string;
+  to?: string;
+  date: string;
+  snippet: string;
+  hasAttachment: boolean;
+}
+
 export interface GmailService {
   searchMessagesWithAttachments(options: GmailSearchOptions): Promise<GmailAttachmentMeta[]>;
   /** Paginated search used by the resumable full-mailbox scan. */
   searchAttachmentsPage(options: GmailSearchOptions): Promise<GmailSearchPage>;
+  /**
+   * Metadata-only message list (may include messages without attachments).
+   * Used to link policy/reg emails to the PDF-bearing message.
+   */
+  searchMessageHints?(options: GmailSearchOptions): Promise<{
+    messages: GmailMessageHint[];
+    nextPageToken: string | null;
+  }>;
   /**
    * Download attachment bytes. Pass `knownMeta` from the scan index to avoid
    * re-fetching the full message for filename/subject/mime.

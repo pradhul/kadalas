@@ -308,7 +308,7 @@ export default function ScanScreen() {
           {!hasPriorScan ? (
             <View style={styles.choice}>
               <Pressable
-                style={styles.choiceCard}
+                style={[styles.choiceCard, styles.choiceCardPrimary]}
                 onPress={async () => {
                   setError(null);
                   setStarting(true);
@@ -321,8 +321,11 @@ export default function ScanScreen() {
                   }
                 }}
               >
-                <Text style={styles.choiceTitle}>Full mailbox scan</Text>
-                <Text style={styles.meta}>All-time attachments · resumable · best first run</Text>
+                <Text style={styles.choiceTitle}>Full mailbox scan (recommended)</Text>
+                <Text style={styles.meta}>
+                  All folders (in:anywhere) · no date limit · paged & resumable. Finds older policies in Updates and
+                  other tabs.
+                </Text>
               </Pressable>
               <Pressable
                 style={styles.choiceCard}
@@ -338,8 +341,8 @@ export default function ScanScreen() {
                   }
                 }}
               >
-                <Text style={styles.choiceTitle}>Lookback ({lookback || '90'} days)</Text>
-                <Text style={styles.meta}>Smaller first pass if you prefer</Text>
+                <Text style={styles.choiceTitle}>Last {lookback || '90'} days only</Text>
+                <Text style={styles.meta}>Quicker first pass — may miss older policies</Text>
               </Pressable>
             </View>
           ) : (
@@ -436,6 +439,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     backgroundColor: colors.paperElevated,
     gap: 4,
+  },
+  choiceCardPrimary: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryContainer,
   },
   choiceTitle: { ...typography.h3, color: colors.ink },
   debugCard: {

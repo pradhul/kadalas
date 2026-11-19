@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-19
+
+### Fixed
+
+- **Missed Gmail documents** (e.g. New India Tata Nexon KL-12-P-2727 in Updates, older than 90 days): first scan defaults to **full mailbox** with `in:anywhere` (no category/tab limits, no `after:`); lookback remains an optional quick choice; incremental unchanged after that.
+- **Known-important-docs pass** on every scan (insurer domains, policy keywords, per-vehicle regs) with no date limit; dedupe by `messageId::attachmentId`; skips already indexed/skipped.
+- **Related-email linking** by policy number / Indian registration (KL12P2727 / KL-12-P-2727 / KL 12 P 2727) so PDF cards get vehicle + issuer metadata.
+- Insurer domain hints (newindia, uiic, tataaig, acko, godigit, policybazaar, phonepe); Gmail To: address normalization (dots / +tags) — never filter by exact To match.
+
+### Changed
+
+- Version bump to **0.2.2**
+
 ## [0.2.1] - 2026-11-17
 
 ### Fixed
@@ -259,6 +272,7 @@ First public pre-release of **Kadalas** (*kadalas* — Malayalam for papers/docu
 - Drive `drive.file` only sees files this app creates (by design)
 - Web mock vault state uses `localStorage`; native mocks are in-memory for the process
 
+[0.2.2]: https://github.com/pradhul/kadalas/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pradhul/kadalas/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pradhul/kadalas/releases/tag/v0.2.0
 [0.1.12]: https://github.com/pradhul/kadalas/releases/tag/v0.1.12

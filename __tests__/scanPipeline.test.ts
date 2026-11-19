@@ -28,8 +28,10 @@ function att(
 describe('scan pipeline', () => {
   it('builds full vs lookback vs incremental queries', () => {
     expect(buildScanGmailQuery({ mode: 'full' })).toMatch(/has:attachment/);
+    expect(buildScanGmailQuery({ mode: 'full' })).toMatch(/in:anywhere/);
     expect(buildScanGmailQuery({ mode: 'full' })).not.toMatch(/after:/);
     expect(buildScanGmailQuery({ mode: 'lookback', lookbackDays: 30 })).toMatch(/after:/);
+    expect(buildScanGmailQuery({ mode: 'lookback', lookbackDays: 30 })).toMatch(/in:anywhere/);
     expect(
       buildScanGmailQuery({ mode: 'incremental', sinceIso: '2026-01-15T00:00:00.000Z' }),
     ).toMatch(/after:2026\/01\/15/);

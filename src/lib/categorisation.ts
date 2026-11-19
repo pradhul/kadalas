@@ -1,5 +1,7 @@
 import { ClassificationResult, DocumentMetadata, VaultCategory } from '../types/document';
 import { normalizeCategory } from './folders';
+import { extractIndianRegistrations, normalizeIndianRegistration } from './indianRegistration';
+import { extractPolicyNumbers } from './knownDocsPass';
 import {
   calibrateConfidence,
   collectClassificationSignals,
@@ -19,6 +21,11 @@ const PROMO_PATTERNS = [
 
 const DOC_HINT_PATTERNS = [
   /policy/i,
+  /motor\s*policy/i,
+  /policy\s*schedule/i,
+  /policy\s*document/i,
+  /premium\s*receipt/i,
+  /\bassurance\b/i,
   /statement/i,
   /invoice/i,
   /receipt/i,
@@ -43,6 +50,13 @@ const DOC_HINT_PATTERNS = [
 
 const ATTACHMENT_ALLOW = [/\.pdf$/i, /\.png$/i, /\.jpe?g$/i, /\.webp$/i, /\.tif{1,2}$/i];
 
+/** Sender domains that are insurers — refined to Vehicle vs Insurance by body text. */
+const INSURER_SENDER_DOMAINS =
+  /@(?:newindia\.co\.in|uiic\.co\.in|icicilombard\.com|hdfcergo\.com|bajajallianz\.co\.in|tataaig\.com|acko\.com|godigit\.com|policybazaar\.com|phonepe\.com)\b/i;
+
+const MOTOR_VEHICLE_WORDS =
+  /\b(motor|vehicle|car|two.?wheeler|registration|reg(?:istration)?\s*(?:no|number|#)|rto|chassis|od\b|own\s*damage|third\s*party|\btp\b)\b/i;
+
 /** Sender domains → category hint (lowercase host). */
 const SENDER_DOMAIN_HINTS: Array<{ test: RegExp; category: VaultCategory }> = [
   { test: /@hdfcbank\.|@hdfcbank\.com/i, category: 'Banking' },
@@ -52,7 +66,10 @@ const SENDER_DOMAIN_HINTS: Array<{ test: RegExp; category: VaultCategory }> = [
   { test: /@federalbank\.|@fednet\./i, category: 'Banking' },
   { test: /@bankofbaroda\.|@bobibanking\./i, category: 'Banking' },
   { test: /@kotak\.com/i, category: 'Banking' },
+  // Vehicle insurers (also refined in categoryFromSenderAndFilename)
   { test: /@hdfcergo\.|@icicilombard\.|@bajajallianz\./i, category: 'Insurance/Vehicle' },
+  { test: /@newindia\.co\.in|@uiic\.co\.in|@tataaig\.|@acko\.|@godigit\./i, category: 'Insurance/Vehicle' },
+  { test: /@policybazaar\.|@phonepe\.com/i, category: 'Insurance/Vehicle' },
   { test: /@mediassist\.|@starhealth\./i, category: 'Insurance/Health' },
   { test: /@irctc\./i, category: 'Travel' },
   { test: /@incometax\.|@tdscpc\.|@in\.gov/i, category: 'Tax' },
@@ -111,6 +128,16 @@ export function shouldConsiderAttachment(input: HeuristicInput): boolean {
 
 function categoryFromSenderAndFilename(input: HeuristicInput): VaultCategory | undefined {
   const from = input.from ?? '';
+  const hay = [input.subject, input.snippet, input.fileName, input.from].filter(Boolean).join(' ');
+
+  if (INSURER_SENDER_DOMAINS.test(from)) {
+    // Motor/vehicle wording → Insurance/Vehicle; otherwise generic Insurance (Health folder as catch-all)
+    return MOTOR_VEHICLE_WORDS.test(hay) ||
+      /motor\s*policy|policy\s*schedule|premium\s*receipt|assurance/i.test(hay)
+      ? 'Insurance/Vehicle'
+      : 'Insurance/Health';
+  }
+
   for (const rule of SENDER_DOMAIN_HINTS) {
     if (rule.test.test(from)) return rule.category;
   }
@@ -149,13 +176,31 @@ export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string
     subject: input.subject,
   });
 
+  const regs = extractIndianRegistrations(haystack);
+  const policies = extractPolicyNumbers(haystack);
+  const registrationNumber = normalizeIndianRegistration(regs[0]) || regs[0];
+  const policyRef = referenceNumber || policies[0];
+
+  // Prefer New India / insurer-friendly issuer names from domain
+  if (!issuer && /newindia\.co\.in/i.test(input.from || '')) issuer = 'New India Assurance';
+  if (/newindia/i.test(input.from || '') || /new india/i.test(haystack)) {
+    issuer = issuer || 'New India Assurance';
+  }
+
   const metadata: DocumentMetadata = {
     issuer,
     documentType,
-    referenceNumber,
+    referenceNumber: policyRef,
+    registrationNumber,
     issueDate: dates.issueDate,
     expiryDate: dates.expiryDate,
   };
+
+  // Card title: Motor insurance · KL12P2727 · New India Assurance
+  let displayTitle = title;
+  if (registrationNumber && (category.startsWith('Insurance') || /motor|vehicle|assurance/i.test(haystack))) {
+    displayTitle = ['Motor insurance', registrationNumber, issuer].filter(Boolean).join(' · ');
+  }
 
   const signals = collectClassificationSignals({
     from: input.from,
@@ -175,7 +220,7 @@ export function classifyWithRules(input: HeuristicInput & { textExcerpt?: string
   return ensureClassificationDisplay(
     {
       category,
-      title,
+      title: displayTitle,
       metadata,
       confidence,
       isImportantDocument: isImportant,
@@ -212,6 +257,15 @@ export function mergeClassification(
 
 function extractIssuer(from?: string, haystack?: string): string | undefined {
   if (from) {
+    if (/newindia\.co\.in/i.test(from)) return 'New India Assurance';
+    if (/uiic\.co\.in/i.test(from)) return 'United India Insurance';
+    if (/tataaig/i.test(from)) return 'Tata AIG';
+    if (/acko\.com/i.test(from)) return 'Acko';
+    if (/godigit/i.test(from)) return 'Go Digit';
+    if (/hdfcergo/i.test(from)) return 'HDFC Ergo';
+    if (/icicilombard/i.test(from)) return 'ICICI Lombard';
+    if (/bajajallianz/i.test(from)) return 'Bajaj Allianz';
+    if (/policybazaar/i.test(from)) return 'Policybazaar';
     const angle = /^(?:"?([^"<]+)"?\s*)?<?([^>]+@[^>]+)>?$/.exec(from.trim());
     if (angle?.[1]?.trim()) return angle[1].trim();
     if (angle?.[2]) {
@@ -222,7 +276,7 @@ function extractIssuer(from?: string, haystack?: string): string | undefined {
     }
   }
   const known =
-    /(geico|progressive|state farm|allstate|aetna|unitedhealthcare|chase|bank of america|wells fargo|irs|hmrc|hdfc|sbi|icici|axis|bajaj allianz|mediassist|irctc|uidai)/i.exec(
+    /(new india assurance|geico|progressive|state farm|allstate|aetna|unitedhealthcare|chase|bank of america|wells fargo|irs|hmrc|hdfc|sbi|icici|axis|bajaj allianz|mediassist|irctc|uidai|tata aig|acko|go digit)/i.exec(
       haystack ?? '',
     );
   return known?.[1]?.replace(/\s+/g, ' ');

@@ -183,6 +183,49 @@ export function createGoogleGmailService(): GmailService {
       return page.attachments;
     },
 
+    async searchMessageHints({ query, maxResults = 25, pageToken }) {
+      const params = new URLSearchParams({
+        q: query,
+        maxResults: String(maxResults),
+      });
+      if (pageToken) params.set('pageToken', pageToken);
+      const listRes = await gmailFetch(`/users/me/messages?${params.toString()}`);
+      const list = (await listRes.json()) as {
+        messages?: Array<{ id: string; threadId?: string }>;
+        nextPageToken?: string;
+      };
+      const messages = [];
+      const queryHasAttachment = /\bhas:attachment\b/i.test(query);
+      for (const msg of list.messages || []) {
+        const metaRes = await gmailFetch(
+          `/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+        );
+        const detail = (await metaRes.json()) as {
+          id: string;
+          threadId?: string;
+          snippet?: string;
+          internalDate?: string;
+          payload?: { headers?: Array<{ name: string; value: string }> };
+        };
+        const headers = detail.payload?.headers;
+        const dateHeader = headerValue(headers, 'Date');
+        const date = detail.internalDate
+          ? new Date(Number(detail.internalDate)).toISOString()
+          : new Date(dateHeader || Date.now()).toISOString();
+        messages.push({
+          messageId: detail.id,
+          threadId: detail.threadId || msg.threadId,
+          subject: headerValue(headers, 'Subject'),
+          from: headerValue(headers, 'From'),
+          to: headerValue(headers, 'To'),
+          date,
+          snippet: detail.snippet || '',
+          hasAttachment: queryHasAttachment,
+        });
+      }
+      return { messages, nextPageToken: list.nextPageToken ?? null };
+    },
+
     async getAttachment(messageId, attachmentId, knownMeta) {
       const attRes = await gmailFetch(`/users/me/messages/${messageId}/attachments/${attachmentId}`);
       const att = (await attRes.json()) as { data: string; size?: number };

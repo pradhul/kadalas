@@ -1,6 +1,15 @@
 import { AttachmentDedupeSet } from '../lib/attachmentFilter';
 import { classifyWithRules } from '../lib/categorisation';
 import { hashBytes } from '../lib/hash';
+import {
+  attachmentDedupeKey,
+  buildKnownDocsQueries,
+  buildRelatedMessageQueries,
+  extractPolicyNumbers,
+  linkRelatedEmailHints,
+  vehicleRegistrationsFromVault,
+} from '../lib/knownDocsPass';
+import { extractIndianRegistrations } from '../lib/indianRegistration';
 import { appendScanEvent } from '../lib/scanPersistSlim';
 import {
   applyClassificationResult,
@@ -14,6 +23,7 @@ import {
   getActiveStageLabel,
   ingestSearchPage,
   isQuotaError,
+  itemIdForAttachment,
   pauseByUser,
   pauseForAuth,
   pauseForQuota,
@@ -159,17 +169,27 @@ export class ScanEngine {
       getAiService().__setMockQuotaFailAfter?.(options.mockQuotaAfter ?? 8);
     }
 
+    const vehicleRegs = vehicleRegistrationsFromVault(options.vaultIndex.documents);
     const job = createScanJob({
       mode: options.mode,
       lookbackDays: options.lookbackDays,
       sinceIso: options.sinceIso ?? options.vaultIndex.lastScanAt,
     });
     job.stage = 'search';
+    job.knownDocsQueries = buildKnownDocsQueries({ vehicleRegistrations: vehicleRegs });
+    job.knownDocsQueryIndex = 0;
+    job.knownDocsPageToken = null;
+    job.knownDocsPassDone = false;
     this.stopRequested = null;
     this.stepsSincePersist = 0;
     this.lastPersistAt = 0;
     this.attachmentDedupe = new AttachmentDedupeSet();
-    this.emit(appendScanEvent(job, `Scan started (${options.mode})`));
+    this.emit(
+      appendScanEvent(
+        job,
+        `Scan started (${options.mode}) · known-docs queries: ${job.knownDocsQueries.length}`,
+      ),
+    );
     await this.persist(true);
     await this.runLoop();
   }
@@ -292,31 +312,217 @@ export class ScanEngine {
   private async stepSearch(): Promise<void> {
     if (!this.state) return;
     const gmail = getGmailService();
-    this.note('Gmail search page…', { label: 'gmail.search', status: 'pending' });
-    const page = await gmail.searchAttachmentsPage({
-      query: this.state.gmailQuery,
-      maxResults: useMocks() ? 40 : DEFAULT_GMAIL_PAGE_SIZE,
-      pageToken: this.state.gmailPageToken,
-    });
-    let next = ingestSearchPage(this.state, page, new Date().toISOString(), this.attachmentDedupe);
-    if (useMocks() && next.stats.emailsChecked >= 100) {
+
+    // Primary mailbox query still paging
+    if (!this.state.gmailSearchDone) {
+      this.note('Gmail search page…', { label: 'gmail.search', status: 'pending' });
+      const page = await gmail.searchAttachmentsPage({
+        query: this.state.gmailQuery,
+        maxResults: useMocks() ? 40 : DEFAULT_GMAIL_PAGE_SIZE,
+        pageToken: this.state.gmailPageToken,
+      });
+      let next = ingestSearchPage(this.state, page, new Date().toISOString(), this.attachmentDedupe);
+      if (useMocks() && next.stats.emailsChecked >= 100) {
+        next = {
+          ...next,
+          gmailSearchDone: true,
+          gmailPageToken: null,
+          stage: next.triageQueue.length ? 'triage' : next.classifyQueue.length ? 'classify' : 'dedupe',
+        };
+      }
+      next = appendScanEvent(
+        next,
+        `Search page ${next.stats.pagesFetched}: +${page.attachments.length} attachments → ${next.stage}`,
+      );
       next = {
         ...next,
-        gmailSearchDone: true,
-        gmailPageToken: null,
-        stage: next.triageQueue.length ? 'triage' : next.classifyQueue.length ? 'classify' : 'dedupe',
+        lastStepAt: new Date().toISOString(),
+        lastApiCall: { at: new Date().toISOString(), label: 'gmail.search', status: '200' },
       };
+      this.emit(next);
+      return;
     }
-    next = appendScanEvent(
-      next,
-      `Search page ${next.stats.pagesFetched}: +${page.attachments.length} attachments → ${next.stage}`,
+
+    // Known-important-docs pass (no date limit) — after primary search finishes
+    if (!this.state.knownDocsPassDone) {
+      await this.stepKnownDocsPass();
+      return;
+    }
+
+    // Both passes done — advance
+    const stage = this.state.triageQueue.length
+      ? ('triage' as const)
+      : this.state.classifyQueue.length
+        ? ('classify' as const)
+        : ('dedupe' as const);
+    this.emit({
+      ...this.state,
+      stage,
+      updatedAt: new Date().toISOString(),
+      lastStepAt: new Date().toISOString(),
+    });
+  }
+
+  /** Date-unlimited insurer/keyword/vehicle queries; skip already indexed/skipped. */
+  private async stepKnownDocsPass(): Promise<void> {
+    if (!this.state) return;
+    const gmail = getGmailService();
+    const queries = this.state.knownDocsQueries?.length
+      ? this.state.knownDocsQueries
+      : buildKnownDocsQueries({
+          vehicleRegistrations: vehicleRegistrationsFromVault(this.vaultDocuments),
+        });
+    let qi = this.state.knownDocsQueryIndex ?? 0;
+
+    if (qi >= queries.length) {
+      const next = {
+        ...this.state,
+        knownDocsPassDone: true,
+        knownDocsQueries: queries,
+        stage: this.state.triageQueue.length
+          ? ('triage' as const)
+          : this.state.classifyQueue.length
+            ? ('classify' as const)
+            : ('dedupe' as const),
+        updatedAt: new Date().toISOString(),
+      };
+      this.emit(appendScanEvent(next, 'Known-docs pass complete'));
+      return;
+    }
+
+    const query = queries[qi];
+    this.note(`Known-docs query ${qi + 1}/${queries.length}…`, {
+      label: 'gmail.knownDocs',
+      status: 'pending',
+    });
+    const page = await gmail.searchAttachmentsPage({
+      query,
+      maxResults: useMocks() ? 40 : DEFAULT_GMAIL_PAGE_SIZE,
+      pageToken: this.state.knownDocsPageToken ?? null,
+    });
+
+    const indexedKeys = new Set(
+      this.vaultDocuments.flatMap((d) =>
+        d.versions
+          .filter((v) => v.gmailMessageId && v.gmailAttachmentId)
+          .map((v) => attachmentDedupeKey(v.gmailMessageId!, v.gmailAttachmentId!)),
+      ),
     );
+    const fresh = page.attachments.filter((att) => {
+      const key = attachmentDedupeKey(att.messageId, att.attachmentId);
+      if (this.state!.items[itemIdForAttachment(att)]) return false;
+      if (indexedKeys.has(key)) return false;
+      if (this.skippedAttachmentIds.has(key)) return false;
+      return true;
+    });
+
+    let next = ingestSearchPage(
+      this.state,
+      {
+        attachments: fresh,
+        nextPageToken: page.nextPageToken,
+        estimatedTotal: page.estimatedTotal,
+        messagesInPage: page.messagesInPage,
+      },
+      new Date().toISOString(),
+      this.attachmentDedupe,
+    );
+
+    // Keep primary search marked done; advance known-docs pagination
     next = {
       ...next,
-      lastStepAt: new Date().toISOString(),
-      lastApiCall: { at: new Date().toISOString(), label: 'gmail.search', status: '200' },
+      gmailSearchDone: true,
+      knownDocsQueries: queries,
+      knownDocsPageToken: page.nextPageToken,
+      knownDocsQueryIndex: page.nextPageToken ? qi : qi + 1,
+      knownDocsPassDone: false,
     };
-    this.emit(next);
+    if (!page.nextPageToken && qi + 1 >= queries.length) {
+      next.knownDocsPassDone = true;
+    }
+
+    // Link related policy/reg emails (Email A without PDF → Email B with PDF)
+    next = await this.enrichWithRelatedHints(next, fresh);
+
+    // Prefer draining triage/classify before next known-docs page
+    if (next.triageQueue.length) next.stage = 'triage';
+    else if (next.classifyQueue.length) next.stage = 'classify';
+    else if (!next.knownDocsPassDone) next.stage = 'search';
+    else next.stage = 'dedupe';
+
+    next = appendScanEvent(
+      next,
+      `Known-docs [${qi + 1}/${queries.length}]: +${fresh.length} new (of ${page.attachments.length}) → ${next.stage}`,
+    );
+    this.emit({
+      ...next,
+      lastStepAt: new Date().toISOString(),
+      lastApiCall: { at: new Date().toISOString(), label: 'gmail.knownDocs', status: '200' },
+    });
+  }
+
+  private async enrichWithRelatedHints(
+    state: ScanJobState,
+    freshAttachments: import('./gmail/types').GmailAttachmentMeta[],
+  ): Promise<ScanJobState> {
+    if (!freshAttachments.length) return state;
+    const gmail = getGmailService();
+    if (!gmail.searchMessageHints) return state;
+
+    const policyNums = new Set<string>();
+    const regs = new Set<string>();
+    for (const att of freshAttachments) {
+      for (const p of extractPolicyNumbers(`${att.subject}\n${att.snippet}`)) policyNums.add(p);
+      for (const r of extractIndianRegistrations(`${att.subject}\n${att.snippet}`)) regs.add(r);
+    }
+    if (!policyNums.size && !regs.size) return state;
+
+    const queries = buildRelatedMessageQueries({
+      policyNumbers: [...policyNums].slice(0, 5),
+      registrations: [...regs].slice(0, 5),
+    }).slice(0, 4);
+
+    const hints = [];
+    for (const q of queries) {
+      try {
+        const page = await gmail.searchMessageHints({ query: q, maxResults: 15 });
+        hints.push(...page.messages);
+      } catch {
+        /* non-fatal */
+      }
+    }
+    if (!hints.length) return state;
+
+    const linked = linkRelatedEmailHints(freshAttachments, hints);
+    if (!linked.size) return state;
+
+    // Stash linked hints onto attachment items as snippet enrichment for classify
+    const items = { ...state.items };
+    for (const [key, hint] of linked) {
+      const [messageId, attachmentId] = key.split('::');
+      const id = itemIdForAttachment({
+        messageId,
+        attachmentId,
+      } as import('./gmail/types').GmailAttachmentMeta);
+      const item = items[id];
+      if (!item?.attachment) continue;
+      const extra = [
+        hint.registrationNumber ? `Vehicle ${hint.registrationNumber}` : '',
+        hint.referenceNumber ? `Policy ${hint.referenceNumber}` : '',
+        hint.issuerHint || '',
+        hint.linkedFromSubject || '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      items[id] = {
+        ...item,
+        attachment: {
+          ...item.attachment,
+          snippet: [item.attachment.snippet, extra].filter(Boolean).join(' · '),
+        },
+      };
+    }
+    return { ...state, items };
   }
 
   private async stepTriage(): Promise<void> {

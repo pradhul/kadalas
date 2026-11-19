@@ -481,8 +481,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const runScan = useCallback(
     async (lookbackDays = 90) => {
+      // First scan defaults to full mailbox (no after:); later runs are incremental.
       await startMailboxScan({
-        mode: index?.lastScanAt ? 'incremental' : 'lookback',
+        mode: index?.lastScanAt ? 'incremental' : 'full',
         lookbackDays,
       });
       return getScanEngine().getState()?.candidates ?? [];

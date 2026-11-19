@@ -3,6 +3,8 @@
  * Scopes stay gmail.readonly — we only search and index, never send/label/delete.
  */
 
+import { gmailAddressesMatch } from './gmailAddress';
+
 export const SELF_SENT_QUERY_BASE =
   'from:me to:me has:attachment (subject:kadalas OR kadalas)';
 
@@ -47,11 +49,10 @@ export function isSelfSentKadalasMessage(input: {
     // from:me to:me query already constrains; still require tag
     return true;
   }
-  const me = normalizeEmail(input.userEmail);
-  const from = extractEmail(input.from);
-  const to = extractEmail(input.to);
-  if (!from || !to) return tagged;
-  return from === me && to === me;
+  // Gmail-normalize (dots / +tags) — never require exact To: string match
+  const fromOk = gmailAddressesMatch(input.from, input.userEmail);
+  const toOk = !input.to || gmailAddressesMatch(input.to, input.userEmail);
+  return fromOk && toOk;
 }
 
 /**

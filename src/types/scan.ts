@@ -82,6 +82,14 @@ export interface ScanJobState {
   gmailQuery: string;
   gmailPageToken: string | null;
   gmailSearchDone: boolean;
+  /**
+   * After the primary query finishes, a date-unlimited "known important docs"
+   * pass runs (insurer domains, policy keywords, per-vehicle regs).
+   */
+  knownDocsPassDone?: boolean;
+  knownDocsQueryIndex?: number;
+  knownDocsPageToken?: string | null;
+  knownDocsQueries?: string[];
   processedMessageIds: string[];
   /** Stage queues (ids into items) */
   triageQueue: string[];
@@ -144,6 +152,11 @@ export function createEmptyScanJob(input: {
     gmailQuery: input.gmailQuery,
     gmailPageToken: null,
     gmailSearchDone: false,
+    // true until ScanEngine.start arms the known-docs pass (avoids resume→search on legacy jobs)
+    knownDocsPassDone: true,
+    knownDocsQueryIndex: 0,
+    knownDocsPageToken: null,
+    knownDocsQueries: [],
     processedMessageIds: [],
     triageQueue: [],
     classifyQueue: [],

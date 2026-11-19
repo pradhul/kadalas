@@ -1,9 +1,6 @@
-# Kadalas v0.2.1
+# Kadalas v0.2.2
 
-## Critical — production no longer shows demo vault
-Real builds (`EXPO_PUBLIC_USE_MOCKS=false`) clear leftover “Try demo data” state on load and only offer **Sign in with Google**. Signed-out users always land on onboarding.
+## Fix — missed Gmail documents
+First scan is a full mailbox (`in:anywhere`, no date limit), plus a known-important-docs pass (insurer domains / policy keywords / your vehicles) with related-email linking so policy PDFs pick up registration numbers from companion emails (e.g. New India Tata Nexon KL-12-P-2727).
 
-## Design fidelity
-Review queue in the sidebar shell with source-email pane; Home desktop detail pane + review banner; storage-mode-accurate copy.
-
-Screenshots: `/opt/cursor/artifacts/v0.2.1-*.png`
+**158** tests. Bundle: `/opt/cursor/artifacts/kadalas.bundle`

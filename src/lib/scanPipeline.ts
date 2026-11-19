@@ -24,10 +24,12 @@ export function buildScanGmailQuery(options: {
   lookbackDays?: number;
   sinceIso?: string | null;
 }): string {
+  // in:anywhere — no category/tab limits (Primary/Updates/Promotions/Social/Forums)
   const base =
-    'has:attachment (filename:pdf OR filename:jpg OR filename:jpeg OR filename:png OR filename:webp OR filename:doc OR filename:docx)';
+    'in:anywhere has:attachment (filename:pdf OR filename:jpg OR filename:jpeg OR filename:png OR filename:webp OR filename:doc OR filename:docx)';
 
   if (options.mode === 'full') {
+    // Full mailbox: no after: — paged + resumable via gmailPageToken
     return base;
   }
 
@@ -450,7 +452,8 @@ export function pauseByUser(state: ScanJobState, nowIso = new Date().toISOString
 export function resumeScan(state: ScanJobState, nowIso = new Date().toISOString()): ScanJobState {
   if (state.cancelled || state.stage === 'completed') return state;
   let stage: ScanStage = 'search';
-  if (!state.gmailSearchDone) stage = 'search';
+  // knownDocsPassDone === false means the new pass is in progress; undefined = legacy job
+  if (!state.gmailSearchDone || state.knownDocsPassDone === false) stage = 'search';
   else if (state.triageQueue.length) stage = 'triage';
   else if (state.classifyQueue.length) stage = 'classify';
   else stage = 'dedupe';

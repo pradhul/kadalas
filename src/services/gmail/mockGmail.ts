@@ -113,6 +113,25 @@ export function createMockGmailService(): GmailService {
       return pageSearch(options);
     },
 
+    async searchMessageHints(options) {
+      const page = pageSearch(options);
+      const seen = new Set<string>();
+      const messages = [];
+      for (const att of page.attachments) {
+        if (seen.has(att.messageId)) continue;
+        seen.add(att.messageId);
+        messages.push({
+          messageId: att.messageId,
+          subject: att.subject,
+          from: att.from,
+          date: att.date,
+          snippet: att.snippet,
+          hasAttachment: true,
+        });
+      }
+      return { messages, nextPageToken: page.nextPageToken };
+    },
+
     async getAttachment(messageId, attachmentId) {
       const meta = byId.get(`${messageId}::${attachmentId}`);
       if (!meta) throw new Error('Mock attachment not found');
